@@ -21,6 +21,20 @@ public static class Seed
 
     private const string Domain = "sonicjoy-solutions.com";
 
+    /// <summary>
+    /// Empties every app table except token usage and the Data Protection keys, then seeds again,
+    /// in one transaction. The only bulk delete in the app, so the audit interceptor never sees it.
+    /// </summary>
+    public static async Task ReseedAsync(AppDb db, TimeProvider clock, TimeZoneInfo zone, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.Database.ExecuteSqlRawAsync(
+            "TRUNCATE notices, proposals, assistant_steps, audit_events, bookings, resources, users", ct);
+        db.ChangeTracker.Clear();
+        await SeedIfEmptyAsync(db, clock, zone, ct);
+        await transaction.CommitAsync(ct);
+    }
+
     public static async Task SeedIfEmptyAsync(AppDb db, TimeProvider clock, TimeZoneInfo zone, CancellationToken ct)
     {
         if (await db.Users.AnyAsync(ct))

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using ResourceBooking.Auth;
 using ResourceBooking.Components;
 using ResourceBooking.Data;
 using ResourceBooking.Endpoints;
@@ -15,6 +16,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddDbContext<AppDb>(options =>
     AppDb.Configure(options, builder.Configuration.GetConnectionString("Db")));
+
+builder.Services.AddAppAuthentication();
+builder.Services.AddProblemDetails();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -47,11 +51,17 @@ else
     app.UseHsts();
 }
 
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// Pages get the not-found page; API calls keep their status code and Problem Details body.
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"), pages =>
+    pages.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapHealthEndpoints();
+app.MapAuthEndpoints();
+app.MapAdminEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
     .AddAdditionalAssemblies(typeof(ResourceBooking.Client._Imports).Assembly);

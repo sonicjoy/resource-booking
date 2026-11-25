@@ -1,7 +1,25 @@
 ﻿@page "/"
+@inject HttpClient Http
+@inject MeAuthenticationStateProvider AuthState
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Resource booking</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>Resource booking</h1>
 
-Welcome to your new app.
+<AuthorizeView>
+    <Authorized>
+        <p>Signed in as @context.User.Identity?.Name.</p>
+        <button type="button" @onclick="SignOutAsync">Sign out</button>
+    </Authorized>
+    <NotAuthorized>
+        <p><a href="sign-in">Sign in</a> to book rooms, cars and catering.</p>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private async Task SignOutAsync()
+    {
+        await Http.PostAsync("api/auth/sign-out", null);
+        AuthState.Refresh();
+    }
+}

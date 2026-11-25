@@ -1,0 +1,56 @@
+@page "/sign-in"
+@inject HttpClient Http
+@inject MeAuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in</PageTitle>
+
+<h1>Sign in</h1>
+<p class="hint">Demo sign-in, standing in for company SSO. Pick who you want to be.</p>
+
+@if (options is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    @foreach (var group in options.GroupBy(o => o.Role).OrderByDescending(g => g.Key))
+    {
+        <h2>@(group.Key == Role.Admin ? "Admins" : "Employees")</h2>
+        <ul class="people">
+            @foreach (var person in group)
+            {
+                <li>
+                    <button type="button" @onclick="() => SignInAsync(person.Id)">
+                        @person.DisplayName <span class="email">@person.Email</span>
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@if (error is not null)
+{
+    <p role="alert">@error</p>
+}
+
+@code {
+    private List<SignInOption>? options;
+    private string? error;
+
+    protected override async Task OnInitializedAsync() =>
+        options = await Http.GetFromJsonAsync<List<SignInOption>>("api/auth/sign-in-options");
+
+    private async Task SignInAsync(Guid userId)
+    {
+        var response = await Http.PostAsJsonAsync("api/auth/sign-in", new SignInRequest(userId));
+        if (!response.IsSuccessStatusCode)
+        {
+            error = "That person can no longer sign in.";
+            return;
+        }
+        AuthState.Refresh();
+        Navigation.NavigateTo("/");
+    }
+}
