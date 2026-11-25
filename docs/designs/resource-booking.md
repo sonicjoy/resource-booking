@@ -25,7 +25,7 @@ Goals 1, 2, 5 and 6 address these four problems in order.
 
 ## Goals
 
-1. **No double booking.** The database refuses any overlapping booking for the same resource. That covers a car's turnaround gap and the same kitchen unit on the same day. Measured by 20 concurrent `POST /api/bookings` requests for one slot: exactly one returns 201 and nineteen return 409.
+1. **No double booking.** The database refuses any overlapping booking for the same resource and unit. That covers a car's turnaround gap and the same kitchen unit on the same day. The server alone assigns every booking's unit (`unit_no`: 0 for rooms and cars, a free unit for a kitchen); a client never supplies it. Measured by 20 concurrent `POST /api/bookings` requests for one slot: exactly one returns 201 and nineteen return 409.
 2. **Refusals the user can act on.** Every refusal names the limit it hit: "Thames seats 8", "Main Kitchen takes 5 orders a day", "Pool Car 1 is booked then, or within its 60-minute gap between bookings". Measured by one test per refusal code that checks both the code and the message.
 3. **Both journeys work first.** The employee and admin critical user journeys (CUJs 1 to 5, below) pass end to end through forms in CI, and CUJ 1 passes against the deployed app, before any assistant work starts.
 4. **Easy to change.** Adding a rule means adding a resource field (entity, DTO, migration, form), one check, one refusal code and one test. Which rule fields each resource type uses is set in one place in Shared.
@@ -144,12 +144,14 @@ Tables use snake_case (EFCore.NamingConventions). Enums are stored as text. Ids 
   * `delivery_at`, `delivery_room_id`: catering only.
   * `status` (`Confirmed` | `Cancelled`), `cancel_reason`, `proposal_id`.
 
-  One raw SQL block in the first migration adds three database rules:
+  One raw SQL block in the first migration adds five database rules:
   * `CHECK (ends_at > starts_at)`
   * `CHECK (blocked_until >= ends_at)`
+  * `CHECK (unit_no >= 0)`
+  * `CHECK (status IN ('Confirmed', 'Cancelled'))`
   * `EXCLUDE USING gist (resource_id WITH =, unit_no WITH =, tstzrange(starts_at, blocked_until, '[)') WITH &&) WHERE (status = 'Confirmed')`
 
-  The exclusion constraint has to be raw SQL, because EF Core has no API for it; the two checks sit beside it so all three are in one place. `btree_gist` is enabled with `HasPostgresExtension`.
+  The exclusion constraint has to be raw SQL, because EF Core has no API for it; the checks sit beside it so all the rules are in one place. `btree_gist` is enabled with `HasPostgresExtension`.
 * **audit_events**: `id`, `at`, `actor_id` (null when seeding), `entity_type`, `entity_id`, `action` (`Added` | `Modified`), `changes` (jsonb, mapping each field to `[old, new]`).
 * **notices**: `id`, `user_id`, `booking_id`, `message`, `created_at`, `read_at`.
 * **assistant_steps**: `id`, `conversation_id`, `user_id`, `seq`, `kind` (`UserMessage` | `ModelCall` | `ToolCall` | `Reply`), `payload` (jsonb, new content only), `input_tokens`, `output_tokens`, `duration_ms`, `at`.
@@ -213,7 +215,7 @@ The endpoints validate the request's shape before `BookingService` runs. `Bookin
    * already started: 422 `ALREADY_STARTED`.
 
    An edit keeps its resource. Moving to another resource means cancel and rebook.
-4. **Load the context:** the caller's future count, not counting this booking. For a kitchen, find the lowest `unit_no` with no confirmed order that local day, again not counting this booking.
+4. **Load the context:** the caller's future count, not counting this booking. For a kitchen, find the lowest `unit_no` with no confirmed order that local day, again not counting this booking. Every other resource uses `unit_no` 0. The database refuses a negative `unit_no`; the upper bound rests on this step.
 5. **Run `BookingRules.Check`.** Any violation returns 422, listing every violation.
 6. **Set the derived fields:** `blocked_until = ends_at + turnaround`, and for catering, `unit_no`.
 7. **Insert or update, then save.** If the database refuses an overlap (SQLSTATE `23P01`), return 409 `OVERLAP`. The message is built from the locked resource row: "Thames is already booked then", or for a resource with a gap, "Pool Car 1 is booked then, or within its 60-minute gap between bookings".
@@ -375,7 +377,7 @@ Simple layouts built from stock Fluent UI components. All times are shown in the
 The options rejected during ideation are in [concepts_brief.md](concepts_brief.md), with their reasons: chat-only booking, a model that commits bookings, prompt-text skills, free-text types, hard deletion and a custom agent loop.
 
 * **Kitchen units as separate resource rows** (the brainstorm's first version). Rejected by author: rules are copied onto N rows, retirement and the per-user cap break across rows, and it needs its own lock and unit picker.
-* **A kitchen with an order count checked in code, or a kitchen-day portion counter.** Rejected by author: the count would be enforced by code rather than the database; the portion counter remains the upgrade path.
+* **A kitchen with an order count checked in code, or a kitchen-day portion counter.** Rejected by author: units reuse the one no-overlap constraint, which the database enforces per unit; the server picking the unit (step 4 above) is the only part left to code. The portion counter remains the upgrade path.
 * **Rule rows with parameters instead of typed columns.** Rejected by author: parameters become untyped JSON with a parser per code, and the compiler no longer checks a rule from the database to the form.
 * **Notices as a query over cancellations.** Rejected by author: it needs actor and read columns on bookings; a `notices` table is simpler.
 * **A clash query in code with a `TURNAROUND` code.** Rejected by author: it is a second overlap check beside the constraint; the 409 is worded from the locked row instead.
@@ -432,8 +434,8 @@ Steps 2 to 10 write their tests first and run them failing.
 2. **Schema and seed.**
    * **Enums:** `Shared/Enums.cs`.
    * **Data:** `Server/Data/AppDb.cs`; entities `Server/Data/Entities/User.cs`, `Resource.cs`, `Booking.cs`, `AuditEvent.cs`, `Notice.cs`, `AssistantStep.cs`, `Proposal.cs`, `TokenUsage.cs`; `Server/Data/Migrations/`, created with `dotnet ef migrations add Init --output-dir Data/Migrations` and holding the raw SQL constraints and every table; `Server/Data/Seed.cs`, with fixed ids and the CUJ seed.
-   * **Fixture:** `Tests/Infrastructure/DbFixture.cs`. One PostgreSQL container per test assembly (an xUnit v3 assembly fixture) is migrated once. Each test class gets its own database, cloned from the migrated template.
-   * **Tests:** `Tests/Database/ConstraintTests.cs`. An overlap is refused (`23P01`). A booking inside the turnaround gap is refused. The same kitchen unit on the same day is refused, and different units are allowed. 20 concurrent inserts give one saved row and nineteen `23P01` errors. Both CHECK constraints hold.
+   * **Fixture:** `Tests/Infrastructure/DbFixture.cs`. One PostgreSQL container per test assembly (an xUnit v3 assembly fixture) is migrated once. Each test gets its own database, cloned from the migrated template.
+   * **Tests:** `Tests/Database/ConstraintTests.cs`. An overlap is refused (`23P01`). A booking inside the turnaround gap is refused. The same kitchen unit on the same day is refused, and different units are allowed. 20 concurrent inserts give one saved row and nineteen `23P01` errors. The four CHECK constraints hold.
    * **Then:** check `btree_gist` on Railway.
 3. **Rules.**
    * **Code:** `Shared/RuleCodes.cs`, `RuleFields.cs`, `Shared/Dtos/BookingRequest.cs` and `Server/Booking/BookingRules.cs`.
@@ -453,6 +455,7 @@ Steps 2 to 10 write their tests first and run them failing.
    * **Tests:** `Tests/Api/BookingApiTests.cs` covers every booking status and code under API, plus:
      * Goal 1: 20 concurrent `POST`s give one 201 and nineteen 409s.
      * Six orders for a 5-unit kitchen give five 201s and one 422 `KITCHEN_FULL`.
+     * A request carrying a `unitNo` for a room is booked on unit 0, so it still clashes with an overlapping booking; a sixth kitchen order carrying `unitNo: 7` still gets 422 `KITCHEN_FULL`.
      * The gap message.
      * An edit at the user's cap is allowed.
      * Owner-only access returns 404 to anyone else.
