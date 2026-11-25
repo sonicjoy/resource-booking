@@ -27,6 +27,14 @@ public class AuthTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Enums_travel_as_names_not_numbers()
+    {
+        var json = await _app.Client().GetStringAsync("/api/auth/sign-in-options", Ct);
+
+        Assert.Contains("\"role\":\"Admin\"", json);
+    }
+
+    [Fact]
     public async Task Me_without_signing_in_is_401_not_a_redirect()
     {
         var response = await _app.Client().GetAsync("/api/auth/me", Ct);
