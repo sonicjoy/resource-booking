@@ -8,7 +8,9 @@ public class HealthTests(WebApplicationFactory<Program> factory) : IClassFixture
     [Fact]
     public async Task Healthz_returns_ok()
     {
-        var client = factory.CreateClient();
+        var client = factory
+            .WithWebHostBuilder(host => host.UseSetting("Database:MigrateOnStart", "false"))
+            .CreateClient();
 
         var response = await client.GetAsync("/healthz", TestContext.Current.CancellationToken);
 
