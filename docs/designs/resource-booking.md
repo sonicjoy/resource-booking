@@ -25,7 +25,7 @@ Goals 1, 2, 5 and 6 address these four problems in order.
 
 ## Goals
 
-1. **No double booking.** The database refuses any overlapping booking for the same resource. That covers a car's turnaround gap and the same kitchen unit on the same day. Measured by 20 concurrent `POST /api/bookings` requests for one slot: exactly one returns 201 and nineteen return 409.
+1. **No double booking.** The database refuses any overlapping booking for the same resource. That covers a car's turnaround gap and the same kitchen unit on the same day. The server alone assigns a booking's kitchen unit (`unit_no`); a client never supplies it. Measured by 20 concurrent `POST /api/bookings` requests for one slot: exactly one returns 201 and nineteen return 409.
 2. **Refusals the user can act on.** Every refusal names the limit it hit: "Thames seats 8", "Main Kitchen takes 5 orders a day", "Pool Car 1 is booked then, or within its 60-minute gap between bookings". Measured by one test per refusal code that checks both the code and the message.
 3. **Both journeys work first.** The employee and admin critical user journeys (CUJs 1 to 5, below) pass end to end through forms in CI, and CUJ 1 passes against the deployed app, before any assistant work starts.
 4. **Easy to change.** Adding a rule means adding a resource field (entity, DTO, migration, form), one check, one refusal code and one test. Which rule fields each resource type uses is set in one place in Shared.
@@ -213,7 +213,7 @@ The endpoints validate the request's shape before `BookingService` runs. `Bookin
    * already started: 422 `ALREADY_STARTED`.
 
    An edit keeps its resource. Moving to another resource means cancel and rebook.
-4. **Load the context:** the caller's future count, not counting this booking. For a kitchen, find the lowest `unit_no` with no confirmed order that local day, again not counting this booking.
+4. **Load the context:** the caller's future count, not counting this booking. For a kitchen, find the lowest `unit_no` with no confirmed order that local day, again not counting this booking. Every other resource uses `unit_no` 0. The database refuses a negative `unit_no`; the upper bound rests on this step.
 5. **Run `BookingRules.Check`.** Any violation returns 422, listing every violation.
 6. **Set the derived fields:** `blocked_until = ends_at + turnaround`, and for catering, `unit_no`.
 7. **Insert or update, then save.** If the database refuses an overlap (SQLSTATE `23P01`), return 409 `OVERLAP`. The message is built from the locked resource row: "Thames is already booked then", or for a resource with a gap, "Pool Car 1 is booked then, or within its 60-minute gap between bookings".
@@ -453,6 +453,7 @@ Steps 2 to 10 write their tests first and run them failing.
    * **Tests:** `Tests/Api/BookingApiTests.cs` covers every booking status and code under API, plus:
      * Goal 1: 20 concurrent `POST`s give one 201 and nineteen 409s.
      * Six orders for a 5-unit kitchen give five 201s and one 422 `KITCHEN_FULL`.
+     * A request carrying a `unitNo` for a room is booked on unit 0, so it still clashes with an overlapping booking.
      * The gap message.
      * An edit at the user's cap is allowed.
      * Owner-only access returns 404 to anyone else.
