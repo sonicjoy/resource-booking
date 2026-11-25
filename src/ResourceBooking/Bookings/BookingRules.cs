@@ -11,13 +11,14 @@ public sealed record BookingCandidate(DateTimeOffset Start, DateTimeOffset End, 
 /// <summary>What the rules need from the database, loaded by the caller under its locks.</summary>
 /// <param name="UserFutureCount">The user's confirmed bookings on this resource that have not ended, excluding the one being edited.</param>
 /// <param name="FreeUnit">For a kitchen: the lowest free unit that day, or null if every unit is taken.</param>
-public sealed record RuleContext(int UserFutureCount = 0, int? FreeUnit = 0);
+public sealed record RuleContext(int UserFutureCount, int? FreeUnit);
 
 public sealed record RuleViolation(string Code, string Message);
 
 /// <summary>
-/// Every booking rule except overlaps, which the database refuses. One method, no I/O:
-/// adding a rule means a resource field, one check here, one code in <see cref="RuleCodes"/> and one test.
+/// Every booking rule except overlaps, which the database refuses. One method, no I/O.
+/// To add a rule: a column on <see cref="Resource"/>, a <see cref="RuleField"/> member listed for the
+/// types it applies to in <see cref="RuleFields"/>, one check here, a code in <see cref="RuleCodes"/>, and a test.
 /// </summary>
 public static class BookingRules
 {
@@ -31,34 +32,43 @@ public static class BookingRules
         var violations = new List<RuleViolation>();
         void Refuse(string code, string message) => violations.Add(new RuleViolation(code, message));
 
-        // A catering order holds its unit for the whole day; the time rules look at the delivery.
-        var start = isKitchen ? candidate.DeliveryAt ?? candidate.Start : candidate.Start;
-        var end = candidate.End;
-        var localStart = TimeZoneInfo.ConvertTime(start, zone).DateTime;
-        var localEnd = TimeZoneInfo.ConvertTime(end, zone).DateTime;
+        // The time rules look at when the resource is needed: for rooms and cars the start,
+        // for a catering order the delivery (the order itself holds its unit for the whole day).
+        var ruleTime = isKitchen
+            ? candidate.DeliveryAt ?? throw new ArgumentException("A catering order needs a delivery time.", nameof(candidate))
+            : candidate.Start;
+        var localRuleTime = TimeZoneInfo.ConvertTime(ruleTime, zone).DateTime;
+        var localEnd = TimeZoneInfo.ConvertTime(candidate.End, zone).DateTime;
         var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);
 
-        if (start < now)
+        if (candidate.End <= candidate.Start)
+        {
+            Refuse(RuleCodes.EndBeforeStart, "The booking must end after it starts");
+        }
+
+        if (ruleTime < now)
         {
             Refuse(RuleCodes.InPast, "That time has already passed");
         }
-        else if (applies.Contains(RuleField.MinNotice) && resource.MinNotice is { } notice && start - now < notice)
+        else if (applies.Contains(RuleField.MinNotice) && resource.MinNotice is { } notice && ruleTime - now < notice)
         {
-            Refuse(RuleCodes.TooSoon, $"{name} needs {Describe(notice)}' notice");
+            Refuse(RuleCodes.TooSoon, $"{name} needs {Notice(notice)}");
         }
 
+        // The window covers the whole booking, so a car can't be kept past it.
+        var lastLocalDay = DateOnly.FromDateTime(isKitchen ? localRuleTime : localEnd);
         if (applies.Contains(RuleField.MaxDaysAhead) && resource.MaxDaysAhead is { } daysAhead
-            && DateOnly.FromDateTime(localStart) > localToday.AddDays(daysAhead))
+            && (long)lastLocalDay.DayNumber - localToday.DayNumber > daysAhead)
         {
             Refuse(RuleCodes.TooFarAhead, $"{name} can be booked up to {daysAhead} days ahead");
         }
 
-        if (OpeningHoursMessage(resource, applies.Contains(RuleField.OpeningHours), localStart, localEnd) is { } hours)
+        if (OpeningHoursMessage(resource, applies.Contains(RuleField.OpeningHours), localRuleTime, localEnd) is { } hours)
         {
             Refuse(RuleCodes.OutsideOpeningHours, hours);
         }
 
-        var length = end - candidate.Start;
+        var length = candidate.End - candidate.Start;
         if (applies.Contains(RuleField.MinDuration) && resource.MinDuration is { } shortest && length < shortest)
         {
             Refuse(RuleCodes.TooShort, $"{name} bookings must last at least {Describe(shortest)}");
@@ -75,16 +85,10 @@ public static class BookingRules
                 : $"{name} seats {resource.Capacity}");
         }
 
-        if (resource.LastDay is { } lastDay)
+        if (resource.LastDay is { } lastDay && IsAfterLastDay(lastDay))
         {
-            // Rooms and cars may not run past the end of the last day; a kitchen order is for one day.
-            var lastMoment = TimeZoneInfo.ConvertTimeToUtc(lastDay.AddDays(1).ToDateTime(TimeOnly.MinValue), zone);
-            var beyond = isKitchen ? DateOnly.FromDateTime(localStart) > lastDay : end > lastMoment;
-            if (beyond)
-            {
-                Refuse(RuleCodes.ResourceRetired,
-                    $"{name} can't be booked after {lastDay.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}");
-            }
+            Refuse(RuleCodes.ResourceRetired,
+                $"{name} can't be booked after {lastDay.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}");
         }
 
         if (applies.Contains(RuleField.MaxFuturePerUser) && resource.MaxFuturePerUser is { } limit
@@ -99,49 +103,80 @@ public static class BookingRules
         }
 
         return violations;
+
+        // A kitchen order is for one day; a room or car may not run past the end of the last day.
+        bool IsAfterLastDay(DateOnly lastDay) => isKitchen
+            ? DateOnly.FromDateTime(localRuleTime) > lastDay
+            : lastDay < DateOnly.MaxValue && candidate.End > StartOfDayUtc(lastDay.AddDays(1), zone);
     }
 
     private static string? OpeningHoursMessage(Resource resource, bool hoursApply, DateTime localStart, DateTime localEnd)
     {
-        var name = resource.Name;
-        var opens = hoursApply ? resource.OpensAt : null;
-        var closes = hoursApply ? resource.ClosesAt : null;
+        var opens = hoursApply ? resource.OpensAt?.ToTimeSpan() : null;
+        var closes = hoursApply ? resource.ClosesAt?.ToTimeSpan() : null;
         var startTime = localStart.TimeOfDay;
 
         switch (resource.Type)
         {
             case ResourceType.MeetingRoom:
                 // Ending exactly at midnight still counts as the same day.
-                var endTime = localEnd.Date == localStart.Date ? localEnd.TimeOfDay
+                TimeSpan? endTime = localEnd.Date == localStart.Date ? localEnd.TimeOfDay
                     : localEnd.Date == localStart.Date.AddDays(1) && localEnd.TimeOfDay == TimeSpan.Zero ? TimeSpan.FromDays(1)
-                    : (TimeSpan?)null;
+                    : null;
                 if (endTime is null)
                 {
-                    return $"{name} bookings must start and end on the same day";
+                    return $"{resource.Name} bookings must start and end on the same day";
                 }
-                if (opens is { } roomOpens && startTime < roomOpens.ToTimeSpan())
+                if (startTime < opens)
                 {
-                    return $"{name} opens at {roomOpens:HH\\:mm}";
+                    return $"{resource.Name} opens at {resource.OpensAt:HH\\:mm}";
                 }
-                if (closes is { } roomCloses && endTime > roomCloses.ToTimeSpan())
+                if (endTime > closes)
                 {
-                    return $"{name} closes at {roomCloses:HH\\:mm}";
+                    return $"{resource.Name} closes at {resource.ClosesAt:HH\\:mm}";
                 }
                 return null;
 
-            case ResourceType.Car when opens is { } carOpens && closes is { } carCloses:
-                var pickUpOk = startTime >= carOpens.ToTimeSpan() && startTime < carCloses.ToTimeSpan();
-                var returnOk = localEnd.TimeOfDay >= carOpens.ToTimeSpan() && localEnd.TimeOfDay <= carCloses.ToTimeSpan();
-                return pickUpOk && returnOk ? null
-                    : $"{name} can be picked up and returned between {carOpens:HH\\:mm} and {carCloses:HH\\:mm}";
+            case ResourceType.Car:
+                // Pick-up must be before closing; return may be exactly at closing.
+                var pickUpOk = !(startTime < opens) && !(startTime >= closes);
+                var returnOk = !(localEnd.TimeOfDay < opens) && !(localEnd.TimeOfDay > closes);
+                return pickUpOk && returnOk ? null : $"{resource.Name} can be picked up and returned {Window(resource)}";
 
-            case ResourceType.Catering when opens is { } kitchenOpens && closes is { } kitchenCloses:
-                return startTime >= kitchenOpens.ToTimeSpan() && startTime < kitchenCloses.ToTimeSpan() ? null
-                    : $"{name} delivers between {kitchenOpens:HH\\:mm} and {kitchenCloses:HH\\:mm}";
+            case ResourceType.Catering:
+                var deliveryOk = !(startTime < opens) && !(startTime >= closes);
+                return deliveryOk ? null : $"{resource.Name} delivers {Window(resource)}";
 
             default:
                 return null;
         }
+    }
+
+    /// <summary>"between 07:00 and 19:00", "from 07:00" or "until 19:00".</summary>
+    private static string Window(Resource resource) => (resource.OpensAt, resource.ClosesAt) switch
+    {
+        ({ } opens, { } closes) => $"between {opens:HH\\:mm} and {closes:HH\\:mm}",
+        ({ } opens, null) => $"from {opens:HH\\:mm}",
+        (null, { } closes) => $"until {closes:HH\\:mm}",
+        _ => "at any time",
+    };
+
+    /// <summary>The UTC instant a local day begins; where midnight is skipped by a clock change, the first valid moment.</summary>
+    private static DateTimeOffset StartOfDayUtc(DateOnly day, TimeZoneInfo zone)
+    {
+        var local = day.ToDateTime(TimeOnly.MinValue);
+        while (zone.IsInvalidTime(local))
+        {
+            local = local.AddMinutes(30);
+        }
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, zone));
+    }
+
+    /// <summary>"1 hour's notice", "2 hours' notice".</summary>
+    private static string Notice(TimeSpan span)
+    {
+        var amount = Describe(span);
+        return amount.EndsWith('s') ? $"{amount}' notice" : $"{amount}'s notice";
     }
 
     /// <summary>"3 days", "4 hours", "1 hour", "30 minutes".</summary>

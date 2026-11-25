@@ -187,11 +187,13 @@ For a catering order, the server takes the day from `deliveryAt` and ignores `st
 
 ### Rules
 
-`BookingRules.Check(request, resource, context, now, zone)` returns every violated rule as a `(code, message)` pair. `context` carries the user's count of future bookings and, for a kitchen, the free unit (or none). The method does no I/O, so each rule is tested without a database. Messages name the limit. `RuleFields.For(type)` in Shared lists the rule fields each type uses, and the admin form shows only those.
+`BookingRules.Check(candidate, resource, context, now, zone)` returns every violated rule as a `(code, message)` pair. `context` carries the user's count of future bookings and, for a kitchen, the free unit (or none). The candidate carries the start, end, attendees and delivery time already converted to UTC. The method does no I/O, so each rule is tested without a database. Messages name the limit. `RuleFields.For(type)` in Shared lists the rule fields each type uses, and the admin form shows only those.
 
 | Code | Meeting room | Car | Kitchen |
 | --- | --- | --- | --- |
-| `IN_PAST`, `TOO_SOON` (`min_notice`), `TOO_FAR_AHEAD` (`max_days_ahead`) | start | pick-up (start) | `deliveryAt` |
+| `END_BEFORE_START` | end not after start | end not after start | not used |
+| `IN_PAST`, `TOO_SOON` (`min_notice`) | start | pick-up (start) | `deliveryAt` |
+| `TOO_FAR_AHEAD` (`max_days_ahead`) | end's day | return's day | `deliveryAt`'s day |
 | `OUTSIDE_OPENING_HOURS` | start and end inside hours on one local day | pick-up and return each inside hours; may span days | `deliveryAt` inside hours |
 | `TOO_SHORT`, `TOO_LONG` | duration | duration | not used |
 | `OVER_CAPACITY` | attendees ≤ seats | passengers ≤ seats | portions ≤ portions per order |
@@ -199,7 +201,7 @@ For a catering order, the server takes the day from `deliveryAt` and ignores `st
 | `USER_LIMIT` (`max_future_per_user`) | the user's confirmed bookings on it with `ends_at > now`, not counting the one being edited | same | same |
 | `KITCHEN_FULL` | not used | not used | no free unit that day ("Main Kitchen takes 5 orders a day") |
 
-* **Boundaries:** `closes_at` is inclusive for an end or a return.
+* **Boundaries:** `closes_at` is inclusive for an end or a return; a start, pick-up or delivery must be before it. A one-sided window (only `opens_at` or only `closes_at`) applies to every type.
 * **No opening hours:** with null hours, no hours check runs, but a room booking still stays within one local day.
 * **Rule changes:** apply to new bookings and edits only.
 
@@ -438,7 +440,7 @@ Steps 2 to 10 write their tests first and run them failing.
    * **Tests:** `Tests/Database/ConstraintTests.cs`. An overlap is refused (`23P01`). A booking inside the turnaround gap is refused. The same kitchen unit on the same day is refused, and different units are allowed. 20 concurrent inserts give one saved row and nineteen `23P01` errors. The four CHECK constraints hold.
    * **Then:** check `btree_gist` on Railway.
 3. **Rules.**
-   * **Code:** `Shared/RuleCodes.cs`, `RuleFields.cs`, `Shared/Dtos/BookingRequest.cs` and `Server/Booking/BookingRules.cs`.
+   * **Code:** `Shared/RuleCodes.cs`, `RuleFields.cs`, `Shared/Dtos/BookingRequest.cs` and `Server/Bookings/BookingRules.cs`.
    * **Example tests:** `Tests/Rules/BookingRulesTests.cs`. One test per code checks the code and the message. Boundary tests cover `closes_at` as inclusive, same-day room bookings, and catering times checked on `deliveryAt`.
    * **Property tests:** `BookingRulesProperties.cs`, with CsCheck. Any room request that `Check` accepts lies inside opening hours on one local day. Any accepted request ends after it starts and stays within `max_duration`. `Check` never throws.
 4. **Sign-in, access and reseed.**
@@ -450,7 +452,7 @@ Steps 2 to 10 write their tests first and run them failing.
    * **Code:** `Server/Data/AuditInterceptor.cs` and `Server/Reports/HistoryLabels.cs`.
    * **Tests:** `Tests/Database/AuditTests.cs`. Working through the DbContext, adding or modifying a `User`, `Resource` or `Booking` leaves one event with its actor and changes.
 6. **Booking API.**
-   * **Code:** `Shared/Dtos/BookingDtos.cs`, `AvailabilityDtos.cs`; `Server/Booking/BookingService.cs`, `AvailabilityService.cs`.
+   * **Code:** `Shared/Dtos/BookingDtos.cs`, `AvailabilityDtos.cs`; `Server/Bookings/BookingService.cs`, `AvailabilityService.cs`.
    * **Endpoints:** `Server/Endpoints/BookingEndpoints.cs` (mine, by id, `POST`, `PUT`, `DELETE`); `AvailabilityEndpoints.cs` (availability, `resources/free`, `GET /api/resources` and `GET /api/resources/{id}`); `NoticeEndpoints.cs`.
    * **Tests:** `Tests/Api/BookingApiTests.cs` covers every booking status and code under API, plus:
      * Goal 1: 20 concurrent `POST`s give one 201 and nineteen 409s.

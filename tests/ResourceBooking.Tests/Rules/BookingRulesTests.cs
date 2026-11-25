@@ -18,6 +18,8 @@ public class BookingRulesTests
     private static DateTimeOffset At(int dayOffset, int hour, int minute = 0) =>
         new DateTimeOffset(2026, 11, 25, 0, 0, 0, TimeSpan.Zero).AddDays(dayOffset).AddHours(hour).AddMinutes(minute);
 
+    private static readonly RuleContext Free = new(UserFutureCount: 0, FreeUnit: 0);
+
     private static Resource Thames() => new()
     {
         Name = "Thames",
@@ -58,7 +60,7 @@ public class BookingRulesTests
     }
 
     private static IReadOnlyList<RuleViolation> Check(BookingCandidate candidate, Resource resource, RuleContext? context = null) =>
-        BookingRules.Check(candidate, resource, context ?? new RuleContext(), Now, London);
+        BookingRules.Check(candidate, resource, context ?? Free, Now, London);
 
     private static void AssertOnly(IReadOnlyList<RuleViolation> violations, string code, string message) =>
         Assert.Equal([new RuleViolation(code, message)], violations);
@@ -174,14 +176,14 @@ public class BookingRulesTests
         var room = Thames();
         room.MaxFuturePerUser = 2;
 
-        AssertOnly(Check(Room(At(1, 10), At(1, 11)), room, new RuleContext(UserFutureCount: 2)),
+        AssertOnly(Check(Room(At(1, 10), At(1, 11)), room, new RuleContext(UserFutureCount: 2, FreeUnit: 0)),
             RuleCodes.UserLimit, "You can hold up to 2 future bookings of Thames");
-        Assert.Empty(Check(Room(At(1, 10), At(1, 11)), room, new RuleContext(UserFutureCount: 1)));
+        Assert.Empty(Check(Room(At(1, 10), At(1, 11)), room, new RuleContext(UserFutureCount: 1, FreeUnit: 0)));
     }
 
     [Fact]
     public void Kitchen_full() =>
-        AssertOnly(Check(Order(At(1, 12)), Kitchen(), new RuleContext(FreeUnit: null)), RuleCodes.KitchenFull, "Main Kitchen takes 5 orders a day");
+        AssertOnly(Check(Order(At(1, 12)), Kitchen(), new RuleContext(UserFutureCount: 0, FreeUnit: null)), RuleCodes.KitchenFull, "Main Kitchen takes 5 orders a day");
 
     [Fact]
     public void Every_broken_rule_is_reported()
@@ -208,8 +210,82 @@ public class BookingRulesTests
         var summerNow = new DateTimeOffset(2026, 7, 8, 9, 0, 0, TimeSpan.Zero);
         var start = new DateTimeOffset(2026, 7, 9, 7, 30, 0, TimeSpan.Zero);
 
-        Assert.Empty(BookingRules.Check(Room(start, start.AddHours(1)), Thames(), new RuleContext(), summerNow, London));
+        Assert.Empty(BookingRules.Check(Room(start, start.AddHours(1)), Thames(), Free, summerNow, London));
     }
+
+    [Fact]
+    public void A_booking_must_end_after_it_starts()
+    {
+        const string message = "The booking must end after it starts";
+        AssertOnly(Check(Room(At(1, 14), At(1, 14)), Thames()), RuleCodes.EndBeforeStart, message);
+        AssertOnly(Check(Room(At(1, 15), At(1, 14)), Thames()), RuleCodes.EndBeforeStart, message);
+        AssertOnly(Check(Room(At(2, 9), At(1, 9), 2), Car()), RuleCodes.EndBeforeStart, message);
+    }
+
+    [Fact]
+    public void Notice_exactly_at_the_limit_passes_and_one_hour_reads_naturally()
+    {
+        var room = Thames();
+        room.MinNotice = TimeSpan.FromHours(1);
+
+        Assert.Empty(Check(Room(At(0, 10), At(0, 11)), room));
+        AssertOnly(Check(Room(At(0, 9, 30), At(0, 11)), room), RuleCodes.TooSoon, "Thames needs 1 hour's notice");
+    }
+
+    [Fact]
+    public void A_car_cannot_be_kept_beyond_the_booking_window()
+    {
+        var car = Car();
+        car.MaxDaysAhead = 30;
+        car.MaxDuration = null;
+
+        AssertOnly(Check(Room(At(29, 9), At(32, 9), 2), car), RuleCodes.TooFarAhead, "Pool Car 1 can be booked up to 30 days ahead");
+    }
+
+    [Fact]
+    public void A_car_returned_exactly_at_closing_time_is_fine() =>
+        Assert.Empty(Check(Room(At(1, 9), At(2, 19), 2), Car()));
+
+    [Fact]
+    public void Catering_order_after_the_kitchens_last_day()
+    {
+        var kitchen = Kitchen();
+        kitchen.LastDay = new DateOnly(2026, 11, 26);
+
+        AssertOnly(Check(Order(At(2, 12)), kitchen), RuleCodes.ResourceRetired, "Main Kitchen can't be booked after 26 Nov 2026");
+        Assert.Empty(Check(Order(At(1, 12)), kitchen));
+    }
+
+    [Fact]
+    public void One_sided_opening_hours_apply_to_cars_and_kitchens()
+    {
+        var car = Car();
+        car.ClosesAt = null;
+        var kitchen = Kitchen();
+        kitchen.OpensAt = null;
+
+        AssertOnly(Check(Room(At(1, 3), At(1, 9), 2), car), RuleCodes.OutsideOpeningHours, "Pool Car 1 can be picked up and returned from 07:00");
+        AssertOnly(Check(Order(At(1, 17)), kitchen), RuleCodes.OutsideOpeningHours, "Main Kitchen delivers until 16:00");
+    }
+
+    [Fact]
+    public void Extreme_admin_values_do_not_throw()
+    {
+        var room = Thames();
+        room.MaxDaysAhead = int.MaxValue;
+        room.LastDay = DateOnly.MaxValue;
+
+        Assert.Empty(Check(Room(At(1, 10), At(1, 11)), room));
+    }
+
+    [Fact]
+    public void A_catering_candidate_without_a_delivery_time_is_a_programming_error() =>
+        Assert.Throws<ArgumentException>(() => Check(new BookingCandidate(At(1, 0), At(2, 0), 8), Kitchen()));
+
+    [Fact]
+    public void Every_rule_field_is_used_by_some_resource_type() =>
+        Assert.All(Enum.GetValues<RuleField>(), field =>
+            Assert.Contains(Enum.GetValues<ResourceType>(), type => RuleFields.For(type).Contains(field)));
 
     [Theory]
     [InlineData(ResourceType.MeetingRoom, new[] { RuleField.OpeningHours, RuleField.MinDuration, RuleField.MaxDuration, RuleField.MinNotice, RuleField.MaxDaysAhead, RuleField.MaxFuturePerUser })]

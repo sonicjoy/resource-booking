@@ -13,4 +13,5 @@ public static class RuleCodes
     public const string ResourceRetired = "RESOURCE_RETIRED";
     public const string UserLimit = "USER_LIMIT";
     public const string KitchenFull = "KITCHEN_FULL";
+    public const string EndBeforeStart = "END_BEFORE_START";
 }

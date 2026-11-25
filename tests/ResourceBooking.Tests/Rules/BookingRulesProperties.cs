@@ -9,15 +9,21 @@ namespace ResourceBooking.Tests.Rules;
 public class BookingRulesProperties
 {
     private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+    private static readonly RuleContext Free = new(UserFutureCount: 0, FreeUnit: 0);
     private static readonly DateTimeOffset Origin = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     // Any instant in 2026 to 2027 on a 15-minute grid, so DST changes in both directions are covered.
     private static readonly Gen<DateTimeOffset> Instant = Gen.Int[0, 2 * 365 * 96].Select(q => Origin.AddMinutes(15 * q));
     private static readonly Gen<TimeSpan> Length = Gen.Int[1, 6 * 96].Select(q => TimeSpan.FromMinutes(15 * q));
 
+    private static readonly TimeZoneInfo Santiago = TimeZoneInfo.FindSystemTimeZoneById("America/Santiago");
+
+    // Santiago changes its clocks at midnight, so a local midnight can be missing there.
+    private static readonly Gen<TimeZoneInfo> AnyZone = Gen.Bool.Select(santiago => santiago ? Santiago : London);
+
     private static readonly Gen<Resource> AnyResource =
-        Gen.Select(Gen.Enum<ResourceType>(), Gen.Int[0, 23], Gen.Int[1, 24], Gen.Int[0, 30], Gen.Bool, Gen.Int[0, 5])
-            .Select((type, open, span, cap, hasHours, lim) => new Resource
+        Gen.Select(Gen.Enum<ResourceType>(), Gen.Int[0, 23], Gen.Int[1, 24], Gen.Int[0, 30], Gen.Bool, Gen.Int[0, 5], Gen.Int[0, 730])
+            .Select((type, open, span, cap, hasHours, lim, lastDay) => new Resource
             {
                 Name = "R",
                 Type = type,
@@ -30,17 +36,20 @@ public class BookingRulesProperties
                 MinNotice = lim == 0 ? null : TimeSpan.FromHours(lim),
                 MaxDaysAhead = lim == 0 ? null : 30 * lim,
                 MaxFuturePerUser = lim == 0 ? null : lim,
-                LastDay = lim == 0 ? null : new DateOnly(2027, lim, 1),
+                LastDay = lim == 0 ? null : DateOnly.FromDateTime(Origin.AddDays(lastDay).DateTime),
             });
+
+    // Lengths in quarter hours, with zero and negative lengths generated as often as positive ones.
+    private static readonly Gen<int> Quarters = Gen.OneOf(Gen.Int[-8, 0], Gen.Int[1, 6 * 96]);
 
     [Fact]
     public void Check_never_throws() =>
-        Gen.Select(AnyResource, Instant, Length, Gen.Int[-5, 40], Instant, Gen.Int[0, 6], Gen.Int[-1, 5])
-            .Sample((resource, start, length, attendees, now, future, unit) =>
+        Gen.Select(AnyResource, Instant, Quarters, Gen.Int[-5, 40], Instant, Gen.Int[0, 6], Gen.Int[-1, 5], AnyZone)
+            .Sample((resource, start, quarters, attendees, now, future, unit, zone) =>
             {
-                var candidate = new BookingCandidate(start, start + length, attendees, start + length / 2);
-                _ = BookingRules.Check(candidate, resource, new RuleContext(future, unit < 0 ? null : unit), now, London);
-            });
+                var candidate = new BookingCandidate(start, start.AddMinutes(15 * quarters), attendees, start);
+                _ = BookingRules.Check(candidate, resource, new RuleContext(future, unit < 0 ? null : unit), now, zone);
+            }, iter: 20_000);
 
     [Fact]
     public void An_accepted_room_booking_lies_inside_opening_hours_on_one_local_day()
@@ -57,7 +66,7 @@ public class BookingRulesProperties
         Gen.Select(Instant, Length).Sample((start, length) =>
         {
             var end = start + length;
-            if (BookingRules.Check(new BookingCandidate(start, end, 1), room, new RuleContext(), Origin, London).Count > 0)
+            if (BookingRules.Check(new BookingCandidate(start, end, 1), room, Free, Origin, London).Count > 0)
             {
                 return;
             }
@@ -71,7 +80,7 @@ public class BookingRulesProperties
 
     [Fact]
     public void An_accepted_booking_ends_after_it_starts_and_within_its_maximum_length() =>
-        Gen.Select(AnyResource, Instant, Gen.Int[-8, 6 * 96]).Sample((resource, start, quarters) =>
+        Gen.Select(AnyResource, Instant, Quarters).Sample((resource, start, quarters) =>
         {
             if (resource.Type == ResourceType.Catering)
             {
@@ -79,7 +88,7 @@ public class BookingRulesProperties
             }
             var end = start.AddMinutes(15 * quarters);
             var candidate = new BookingCandidate(start, end, 1);
-            if (BookingRules.Check(candidate, resource, new RuleContext(), Origin, London).Count > 0)
+            if (BookingRules.Check(candidate, resource, Free, Origin, London).Count > 0)
             {
                 return;
             }
@@ -88,14 +97,14 @@ public class BookingRulesProperties
             {
                 Assert.True(end - start <= max);
             }
-        });
+        }, iter: 50_000);
 
     [Fact]
     public void An_accepted_booking_never_exceeds_capacity() =>
         Gen.Select(AnyResource, Instant, Gen.Int[1, 40]).Sample((resource, start, attendees) =>
         {
             var candidate = new BookingCandidate(start, start.AddHours(1), attendees, start);
-            if (BookingRules.Check(candidate, resource, new RuleContext(), Origin, London).Count == 0)
+            if (BookingRules.Check(candidate, resource, Free, Origin, London).Count == 0)
             {
                 Assert.True(attendees <= resource.Capacity);
             }
