@@ -432,7 +432,7 @@ Steps 2 to 10 write their tests first and run them failing.
 2. **Schema and seed.**
    * **Enums:** `Shared/Enums.cs`.
    * **Data:** `Server/Data/AppDb.cs`; entities `Server/Data/Entities/User.cs`, `Resource.cs`, `Booking.cs`, `AuditEvent.cs`, `Notice.cs`, `AssistantStep.cs`, `Proposal.cs`, `TokenUsage.cs`; `Server/Data/Migrations/`, created with `dotnet ef migrations add Init --output-dir Data/Migrations` and holding the raw SQL constraints and every table; `Server/Data/Seed.cs`, with fixed ids and the CUJ seed.
-   * **Fixture:** `Tests/Infrastructure/DbFixture.cs`. One PostgreSQL container per test assembly (an xUnit v3 assembly fixture) is migrated once. Each test class gets its own database, cloned from the migrated template.
+   * **Fixture:** `Tests/Infrastructure/DbFixture.cs`. One PostgreSQL container per test assembly (an xUnit v3 assembly fixture) is migrated once. Each test gets its own database, cloned from the migrated template.
    * **Tests:** `Tests/Database/ConstraintTests.cs`. An overlap is refused (`23P01`). A booking inside the turnaround gap is refused. The same kitchen unit on the same day is refused, and different units are allowed. 20 concurrent inserts give one saved row and nineteen `23P01` errors. Both CHECK constraints hold.
    * **Then:** check `btree_gist` on Railway.
 3. **Rules.**
