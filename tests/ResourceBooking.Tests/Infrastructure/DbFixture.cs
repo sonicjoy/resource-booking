@@ -26,15 +26,18 @@ public sealed class DbFixture : IAsyncLifetime
         {
             await db.Database.MigrateAsync();
         }
+        // PostgreSQL refuses to clone a template while any session is connected to it,
+        // so drop the pooled connections the migration left open.
         NpgsqlConnection.ClearAllPools();
     }
 
     public async ValueTask DisposeAsync() => await _container.DisposeAsync();
 
-    /// <summary>Creates an empty, migrated database and returns its connection string.</summary>
+    /// <summary>Creates a migrated database with no rows and returns its connection string.</summary>
     public async Task<string> CreateDatabaseAsync()
     {
         var name = "t_" + Guid.NewGuid().ToString("N");
+        // Two clones of one template at the same moment can trip the same "in use" check.
         await _cloneLock.WaitAsync();
         try
         {
@@ -47,11 +50,16 @@ public sealed class DbFixture : IAsyncLifetime
         return ConnectionString(name);
     }
 
+    /// <summary>Creates a database with no schema at all, as on a first deploy.</summary>
+    public async Task<string> CreateUnmigratedDatabaseAsync()
+    {
+        var name = "e_" + Guid.NewGuid().ToString("N");
+        await ExecuteOnServerAsync($"CREATE DATABASE {name}");
+        return ConnectionString(name);
+    }
+
     public static AppDb CreateDb(string connectionString) =>
-        new(new DbContextOptionsBuilder<AppDb>()
-            .UseNpgsql(connectionString)
-            .UseSnakeCaseNamingConvention()
-            .Options);
+        new((DbContextOptions<AppDb>)AppDb.Configure(new DbContextOptionsBuilder<AppDb>(), connectionString).Options);
 
     private string ConnectionString(string database) =>
         new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = database }.ConnectionString;

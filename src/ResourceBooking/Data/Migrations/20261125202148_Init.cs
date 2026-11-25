@@ -19,8 +19,7 @@ namespace ResourceBooking.Data.Migrations
                 name: "assistant_steps",
                 columns: table => new
                 {
-                    id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
                     conversation_id = table.Column<Guid>(type: "uuid", nullable: false),
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
                     seq = table.Column<int>(type: "integer", nullable: false),
@@ -40,8 +39,7 @@ namespace ResourceBooking.Data.Migrations
                 name: "audit_events",
                 columns: table => new
                 {
-                    id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
                     at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     actor_id = table.Column<Guid>(type: "uuid", nullable: true),
                     entity_type = table.Column<string>(type: "text", nullable: false),
@@ -268,13 +266,15 @@ namespace ResourceBooking.Data.Migrations
                 unique: true);
 
             // The database refuses double bookings itself. EF Core has no API for exclusion
-            // constraints, so all three booking rules are written here together. A cancelled
+            // constraints, so all the booking rules are written here together. A cancelled
             // booking frees its slot; blocked_until carries a car's turnaround gap; unit_no
             // separates the units of one kitchen.
             migrationBuilder.Sql("""
                 ALTER TABLE bookings
                     ADD CONSTRAINT ck_bookings_ends_after_start CHECK (ends_at > starts_at),
                     ADD CONSTRAINT ck_bookings_blocked_until CHECK (blocked_until >= ends_at),
+                    ADD CONSTRAINT ck_bookings_unit_no CHECK (unit_no >= 0),
+                    ADD CONSTRAINT ck_bookings_status CHECK (status IN ('Confirmed', 'Cancelled')),
                     ADD CONSTRAINT ex_bookings_no_overlap EXCLUDE USING gist (
                         resource_id WITH =,
                         unit_no WITH =,

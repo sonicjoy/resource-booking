@@ -54,6 +54,36 @@ public class SeedTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Local_times_are_converted_with_the_company_zone_in_summer()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var db = DbFixture.CreateDb(_connectionString);
+        // Wednesday 8 July 2026, 09:00 in London (BST, UTC+1).
+        var summer = new FakeTimeProvider(new DateTimeOffset(2026, 7, 8, 8, 0, 0, TimeSpan.Zero));
+
+        await Seed.SeedIfEmptyAsync(db, summer, London, ct);
+
+        var nineLondonTomorrow = new DateTimeOffset(2026, 7, 9, 8, 0, 0, TimeSpan.Zero);
+        Assert.True(await db.Bookings.AnyAsync(b => b.ResourceId == Seed.PoolCar1Id && b.StartsAt == nineLondonTomorrow, ct));
+    }
+
+    [Fact]
+    public async Task Seeded_bookings_have_the_same_ids_every_time()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var other = await fixture.CreateDatabaseAsync();
+        await using var first = DbFixture.CreateDb(_connectionString);
+        await using var second = DbFixture.CreateDb(other);
+
+        await Seed.SeedIfEmptyAsync(first, _clock, London, ct);
+        await Seed.SeedIfEmptyAsync(second, _clock, London, ct);
+
+        Assert.Equal(
+            await first.Bookings.OrderBy(b => b.Id).Select(b => b.Id).ToListAsync(ct),
+            await second.Bookings.OrderBy(b => b.Id).Select(b => b.Id).ToListAsync(ct));
+    }
+
+    [Fact]
     public async Task Seeding_twice_adds_nothing()
     {
         var ct = TestContext.Current.CancellationToken;

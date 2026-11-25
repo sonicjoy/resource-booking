@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using ResourceBooking.Data.Entities;
-using ResourceBooking.Shared;
 
 namespace ResourceBooking.Data;
 
@@ -17,14 +16,14 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options), IDataP
     public DbSet<TokenUsage> TokenUsage => Set<TokenUsage>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
+    /// <summary>The one place the provider and naming are set, shared by the app and the tests.</summary>
+    public static DbContextOptionsBuilder Configure(DbContextOptionsBuilder options, string? connectionString) =>
+        options.UseNpgsql(connectionString).UseSnakeCaseNamingConvention();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        configurationBuilder.Properties<ResourceType>().HaveConversion<string>();
-        configurationBuilder.Properties<Role>().HaveConversion<string>();
-        configurationBuilder.Properties<BookingStatus>().HaveConversion<string>();
-        configurationBuilder.Properties<StepKind>().HaveConversion<string>();
-        configurationBuilder.Properties<ProposalKind>().HaveConversion<string>();
-        configurationBuilder.Properties<ProposalStatus>().HaveConversion<string>();
+        // Every enum is stored as its name, so a new enum needs no registration here.
+        configurationBuilder.Properties<Enum>().HaveConversion<string>();
     }
 
     protected override void OnModelCreating(ModelBuilder model)

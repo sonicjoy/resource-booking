@@ -79,9 +79,12 @@ public static class Seed
         };
         db.Resources.AddRange(thames, severn, car, kitchen);
 
+        var bookingNo = 0;
+        Guid NextBookingId() => new($"0193a000-0000-7000-8000-{0x200 + ++bookingNo:x12}");
+
         Booking Book(Resource resource, Guid userId, DateTimeOffset start, DateTimeOffset end, int attendees, string? title = null) => new()
         {
-            Id = Guid.CreateVersion7(),
+            Id = NextBookingId(),
             ResourceId = resource.Id,
             UserId = userId,
             Title = title,
@@ -94,7 +97,7 @@ public static class Seed
 
         Booking Lunch(int dayOffset, int unit, Guid userId, int portions, Resource room, int hour) => new()
         {
-            Id = Guid.CreateVersion7(),
+            Id = NextBookingId(),
             ResourceId = kitchen.Id,
             UserId = userId,
             UnitNo = unit,

@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
-using ResourceBooking.Data;
 using ResourceBooking.Components;
+using ResourceBooking.Data;
 using ResourceBooking.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,9 +13,8 @@ var companyZone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["Boo
 builder.Services.AddSingleton(companyZone);
 builder.Services.AddSingleton(TimeProvider.System);
 
-builder.Services.AddDbContext<AppDb>(options => options
-    .UseNpgsql(builder.Configuration.GetConnectionString("Db"))
-    .UseSnakeCaseNamingConvention());
+builder.Services.AddDbContext<AppDb>(options =>
+    AppDb.Configure(options, builder.Configuration.GetConnectionString("Db")));
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -27,12 +26,13 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 var app = builder.Build();
 
 // Safe while the app runs as a single replica (see the design's Risks section).
-if (app.Configuration.GetValue("Database:MigrateOnStart", true))
+await using (var scope = app.Services.CreateAsyncScope())
 {
-    await using var scope = app.Services.CreateAsyncScope();
-    var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+    var services = scope.ServiceProvider;
+    var db = services.GetRequiredService<AppDb>();
     await db.Database.MigrateAsync();
-    await Seed.SeedIfEmptyAsync(db, TimeProvider.System, companyZone, CancellationToken.None);
+    await Seed.SeedIfEmptyAsync(db, services.GetRequiredService<TimeProvider>(),
+        services.GetRequiredService<TimeZoneInfo>(), CancellationToken.None);
 }
 
 app.UseForwardedHeaders();

@@ -48,12 +48,10 @@ namespace ResourceBooking.Data.Migrations
 
             modelBuilder.Entity("ResourceBooking.Data.Entities.AssistantStep", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<DateTimeOffset>("At")
                         .HasColumnType("timestamp with time zone")
@@ -105,12 +103,10 @@ namespace ResourceBooking.Data.Migrations
 
             modelBuilder.Entity("ResourceBooking.Data.Entities.AuditEvent", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<string>("Action")
                         .IsRequired()
