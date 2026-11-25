@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ResourceBooking.Client/ResourceBooking.Client.csproj" />
+    <Project Path="src/ResourceBooking.Shared/ResourceBooking.Shared.csproj" />
+    <Project Path="src/ResourceBooking/ResourceBooking.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ResourceBooking.E2E/ResourceBooking.E2E.csproj" />
+    <Project Path="tests/ResourceBooking.Tests/ResourceBooking.Tests.csproj" />
+  </Folder>
+</Solution>
