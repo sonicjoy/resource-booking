@@ -323,10 +323,10 @@ A propose tool runs the same checks as booking (`BookingService.PreviewAsync`: t
 **Limits and failures.**
 
 * **Rate limit:** 10 messages a minute per user (`Assistant:MessagesPerMinute`, 0 turns it off), with the ASP.NET Core rate limiter. Over it returns 429 `RATE_LIMITED`.
-* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Each call first reserves an upper bound (its input's UTF-8 bytes plus `Assistant:MaxOutputTokens`, default 800, which is also sent as the call's output cap) and settles to the reported usage afterwards; a call that fails or is abandoned keeps its reservation. Over the budget returns 429 `BUDGET_EXHAUSTED`.
+* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Each call first reserves an upper bound (its input's UTF-8 bytes plus `Assistant:MaxOutputTokens`, default 4000 so a reasoning model has room to think, which is also sent as the call's output cap) and settles to the reported usage afterwards; a call that fails or is abandoned keeps its reservation. Over the budget returns 429 `BUDGET_EXHAUSTED`.
 * **Model timeout or error:** after 30 seconds (`Assistant:TimeoutSeconds`), or on any error, the panel shows a short reply that says so. The forms are unaffected.
 
-**Key.** `OpenAI:ApiKey` and `OpenAI:Model` come from config and never reach the client.
+**Key and model.** `OpenAI:ApiKey` and `OpenAI:Model` (default `gpt-6-luna`) come from config and never reach the client. Calls go through OpenAI's Responses API, which reasoning models need for tools, with nothing stored at OpenAI.
 
 **Evals.** `evals/cases.json` holds requests, a fixed clock and the expected proposal fields. `EvalTests`, marked `Category=Eval`, runs them against the real model on demand.
 

@@ -66,10 +66,16 @@ public class EvalTests(DbFixture fixture)
             foreach (var expected in turn.Expect)
             {
                 var match = unmatched.FirstOrDefault(p => Matches(expected, p, reply.Proposals, names, resourceOfBooking));
-                Assert.True(match is not null, $"Turn \"{turn.Text}\": no proposal matches {JsonSerializer.Serialize(expected)}; got: {Describe(reply)}");
+                if (match is null)
+                {
+                    Assert.Fail($"Turn \"{turn.Text}\": no proposal matches {JsonSerializer.Serialize(expected)}; got: {Describe(reply)}{await ToolsAsync(app, reply.ConversationId)}");
+                }
                 unmatched.Remove(match);
             }
-            Assert.True(unmatched.Count == 0, $"Turn \"{turn.Text}\": unexpected proposals: {Describe(reply)}");
+            if (unmatched.Count > 0)
+            {
+                Assert.Fail($"Turn \"{turn.Text}\": unexpected proposals: {Describe(reply)}{await ToolsAsync(app, reply.ConversationId)}");
+            }
         }
 
         await using var check = app.Db();
@@ -113,6 +119,16 @@ public class EvalTests(DbFixture fixture)
     }
 
     private static DateTime Local(string text) => DateTime.Parse(text, CultureInfo.InvariantCulture);
+
+    /// <summary>The tool calls the model made in the conversation and what each returned, to tell a model that skipped a step from a tool that refused it.</summary>
+    private static async Task<string> ToolsAsync(ApiFactory app, Guid conversationId)
+    {
+        await using var db = app.Db();
+        var calls = await db.AssistantSteps.AsNoTracking()
+            .Where(s => s.ConversationId == conversationId && s.Kind == StepKind.ToolCall)
+            .OrderBy(s => s.Seq).Select(s => s.Payload).ToListAsync();
+        return calls.Count == 0 ? "; tool calls: none" : "; tool calls: " + string.Join(" | ", calls);
+    }
 
     private static string Describe(AssistantReply reply) =>
         reply.Proposals.Count == 0 ? $"none (\"{reply.Text}\")" : string.Join("; ", reply.Proposals.Select(p => $"{p.Kind} {p.Summary}"));

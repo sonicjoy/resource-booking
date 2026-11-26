@@ -396,10 +396,10 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         var text = new string('é', 1000);
         await ReplyAsync(await ana.PostAsJsonAsync("/api/assistant/messages", new { text }, Ct));
 
-        // The reservation is kept, since nothing reported the real usage: the output cap (800) plus at least the
+        // The reservation is kept, since nothing reported the real usage: the output cap (4000) plus at least the
         // message's UTF-8 bytes (2 per é) as its input bound.
         await using var db = app.Db();
-        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 800 + 2000);
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 4000 + 2000);
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
 
         await ReplyAsync(await SayAsync(ana, "hello"));
 
-        Assert.Equal(800, _app.Model.Options.Single()?.MaxOutputTokens);
+        Assert.Equal(4000, _app.Model.Options.Single()?.MaxOutputTokens);
     }
 
     [Fact]
@@ -443,6 +443,53 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
         Assert.Contains("Severn", payload);
         Assert.DoesNotContain("Thames", payload);
+    }
+
+    [Fact]
+    public async Task The_same_proposal_twice_in_one_turn_is_offered_once()
+    {
+        _app.Model.On("a room", "Here.", ProposeRoom(Seed.SevernId, "09:00", "12:00", 10), ProposeRoom(Seed.SevernId, "09:00", "12:00", 10));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "a room for 10 tomorrow morning"));
+
+        Assert.Single(reply.Proposals);
+        await using var db = _app.Db();
+        Assert.Equal(1, await db.Proposals.CountAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Catering_proposed_against_a_room_is_refused_with_the_kitchens_to_use()
+    {
+        _app.Model.On("lunch", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, deliveryAt = "2026-11-26T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "lunch for 8 in Thames at 12:30 tomorrow"));
+
+        Assert.Empty(reply.Proposals);
+        await using var db = _app.Db();
+        var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("resourceId is the kitchen", payload);
+        Assert.Contains(Seed.MainKitchenId.ToString(), payload);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("2026-11-26T12:30")]
+    [InlineData("2026-11-26T12:00")]
+    public async Task Find_free_kitchens_needs_only_the_delivery_time(string? end)
+    {
+        // A catering order is delivered at a time; the model often sends that time as start and end, or no end.
+        _app.Model.On("lunch", "Main Kitchen.", Call("find_free_resources", new { type = "Catering", start = "2026-11-26T12:30", end, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "lunch for 8 at 12:30 tomorrow?"));
+
+        await using var db = _app.Db();
+        var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("Main Kitchen", payload);
+        Assert.Contains(Seed.MainKitchenId.ToString(), payload);
     }
 
     [Fact]
@@ -544,7 +591,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
 
         // Nothing says what it cost, so the upper bound stands: the output cap plus the input's bytes.
         await using var db = _app.Db();
-        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens > 800);
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens > 4000);
     }
 
     [Fact]
