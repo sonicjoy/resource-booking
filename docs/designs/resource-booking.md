@@ -227,7 +227,7 @@ The endpoints validate the request's shape before `BookingService` runs. `Bookin
    * it is under 24 hours old;
    * its kind matches the endpoint (`Create` to `POST`; `Change` or `Cancel` to the same booking).
 
-   `changed_before_confirm` is set when the submitted values differ from the proposal's payload. If any check fails, the booking goes ahead unlinked. A proposal never makes a booking fail.
+   The proposal row is read `FOR UPDATE SKIP LOCKED`, so a second request carrying the same proposal books unlinked rather than waiting (waiting could deadlock with the foreign-key lock a catering order takes on its delivery room). `changed_before_confirm` is set when the submitted values differ from the proposal's payload. If any check fails, the booking goes ahead unlinked. A proposal never makes a booking fail.
 
 **Cancel** runs steps 1 to 3, then sets `status = Cancelled` and fills `cancel_reason`. Rows are never deleted, except by reseed.
 

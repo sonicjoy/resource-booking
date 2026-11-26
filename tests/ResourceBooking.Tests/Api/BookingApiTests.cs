@@ -130,6 +130,8 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     [Theory]
     [InlineData("/api/availability?date=9999-12-31&type=MeetingRoom")]
     [InlineData("/api/resources/free?type=Car&start=9999-12-31T22:00&end=9999-12-31T23:30&attendees=1")]
+    [InlineData("/api/bookings/mine?to=9999-12-31")]
+    [InlineData("/api/bookings/mine?from=9999-12-31")]
     public async Task Reads_at_the_end_of_the_calendar_are_400(string url)
     {
         var ana = await _app.SignedInAsync(Seed.AnaId);
@@ -414,6 +416,23 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_booking_under_way_cannot_be_changed_or_cancelled()
+    {
+        var (_, booking) = await AnaBooksThamesAsync();
+        _app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 26, 14, 30, 0, TimeSpan.Zero));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var cancel = await ana.DeleteAsync($"/api/bookings/{booking.Id}", Ct);
+        var edit = await ana.PutAsJsonAsync($"/api/bookings/{booking.Id}", Room(Seed.ThamesId, "14:00", "16:00"), Ct);
+
+        foreach (var response in new[] { cancel, edit })
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            Assert.Equal("ALREADY_STARTED", (await Body(response)).GetProperty("code").GetString());
+        }
+    }
+
+    [Fact]
     public async Task Every_booking_write_leaves_its_audit_event()
     {
         var (ana, booking) = await AnaBooksThamesAsync();
@@ -543,6 +562,16 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
         var (_, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: "Renamed");
 
         Assert.True(proposal.ChangedBeforeConfirm);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_empty_title_against_a_proposal_without_one_is_not_a_change(string title)
+    {
+        var (_, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: title);
+
+        Assert.False(proposal.ChangedBeforeConfirm);
     }
 
     [Fact]

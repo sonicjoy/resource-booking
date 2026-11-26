@@ -16,6 +16,10 @@ public static class BookingEndpoints
 
         bookings.MapGet("/mine", async (DateOnly? from, DateOnly? to, HttpContext http, AppDb db, TimeZoneInfo zone, CancellationToken ct) =>
         {
+            if ((from is { } f && !CompanyTime.InRange(f)) || (to is { } t && !CompanyTime.InRange(t)))
+            {
+                return ApiResults.Problem(ApiError.BadRequest("Give dates before the year 9999"));
+            }
             var userId = http.User.UserId();
             var query = db.Bookings.AsNoTracking().Include(b => b.Resource).Where(b => b.UserId == userId);
             if (from is { } first)
@@ -29,7 +33,7 @@ public static class BookingEndpoints
                 query = query.Where(b => b.StartsAt < end);
             }
             var list = await query.OrderBy(b => b.StartsAt).ToListAsync(ct);
-            return list.Select(b => ToDto(b, zone)).ToList();
+            return Results.Ok(list.Select(b => ToDto(b, zone)).ToList());
         });
 
         bookings.MapGet("/{id:guid}", async (Guid id, HttpContext http, AppDb db, TimeZoneInfo zone, CancellationToken ct) =>
