@@ -77,12 +77,19 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
     public async Task<int> CancelFutureBookingsAsync(Expression<Func<Booking, bool>> filter, string reason, Guid? actorId, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        var bookings = await db.Bookings
-            .Include(b => b.Resource)
-            .Include(b => b.User)
-            .Where(filter)
+        var ids = await db.Bookings.Where(filter)
             .Where(b => b.Status == BookingStatus.Confirmed && (b.DeliveryAt ?? b.StartsAt) > now)
+            .Select(b => b.Id)
+            .ToArrayAsync(ct);
+        // Lock the rows in id order and re-check them, so two cascades over the same bookings (a retirement and
+        // a deactivation) cancel each one once, and never deadlock on each other.
+        var bookings = await db.Bookings
+            .FromSql($"SELECT * FROM bookings WHERE id = ANY({ids}) AND status = 'Confirmed' ORDER BY id FOR NO KEY UPDATE")
             .ToListAsync(ct);
+        var resourceIds = bookings.Select(b => b.ResourceId).Distinct().ToList();
+        var userIds = bookings.Select(b => b.UserId).Distinct().ToList();
+        await db.Resources.Where(r => resourceIds.Contains(r.Id)).LoadAsync(ct);
+        await db.Users.Where(u => userIds.Contains(u.Id)).LoadAsync(ct);
 
         foreach (var booking in bookings)
         {

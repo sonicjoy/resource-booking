@@ -27,7 +27,8 @@ public sealed class ResourceRequest : IValidatableObject
     [Required, StringLength(100, MinimumLength = 1)]
     public string Name { get; set; } = "";
 
-    public ResourceType Type { get; set; }
+    [Required]
+    public ResourceType? Type { get; set; }
 
     /// <summary>Seats for a room or car; portions per order for a kitchen.</summary>
     [Range(1, 1000)]
@@ -77,7 +78,11 @@ public sealed class ResourceRequest : IValidatableObject
     }
 }
 
-public sealed record RetirementRequest(DateOnly LastDay);
+public sealed class RetirementRequest
+{
+    [Required]
+    public DateOnly? LastDay { get; set; }
+}
 
 /// <summary>The result of a retirement or deactivation: how many future bookings it cancelled.</summary>
 public sealed record CascadeResult(int Cancelled);
@@ -92,3 +97,6 @@ public sealed record FieldChange(string Field, string? Old, string? New);
 
 /// <summary>An audit event in words: who did what to which user, resource or booking, and when (London time).</summary>
 public sealed record HistoryItem(DateTime At, string Actor, string EntityType, Guid EntityId, string Entity, string Verb, IReadOnlyList<FieldChange> Changes);
+
+/// <summary>History, newest first, up to a limit; More is true when older matching events were left out.</summary>
+public sealed record HistoryPage(IReadOnlyList<HistoryItem> Items, bool More);

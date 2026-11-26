@@ -14,7 +14,7 @@ public sealed class History(AppDb db, TimeZoneInfo zone)
     public const int Limit = 500;
     public static readonly IReadOnlySet<string> EntityTypes = new HashSet<string> { nameof(User), nameof(Resource), nameof(Booking) };
 
-    public async Task<List<HistoryItem>> ListAsync(string? entityType, Guid? entityId, DateOnly? from, DateOnly? to, CancellationToken ct)
+    public async Task<HistoryPage> ListAsync(string? entityType, Guid? entityId, DateOnly? from, DateOnly? to, CancellationToken ct)
     {
         var query = db.AuditEvents.AsNoTracking();
         if (entityType is not null)
@@ -35,7 +35,9 @@ public sealed class History(AppDb db, TimeZoneInfo zone)
             var end = CompanyTime.StartOfDay(last.AddDays(1), zone);
             query = query.Where(e => e.At < end);
         }
-        var events = await query.OrderByDescending(e => e.At).ThenByDescending(e => e.Id).Take(Limit).ToListAsync(ct);
+        var events = await query.OrderByDescending(e => e.At).ThenByDescending(e => e.Id).Take(Limit + 1).ToListAsync(ct);
+        var more = events.Count > Limit;
+        events = events.Take(Limit).ToList();
 
         var userIds = events.Where(e => e.EntityType == nameof(User)).Select(e => e.EntityId)
             .Concat(events.Select(e => e.ActorId).OfType<Guid>()).ToHashSet();
@@ -49,12 +51,13 @@ public sealed class History(AppDb db, TimeZoneInfo zone)
         {
             nameof(User) => users.GetValueOrDefault(e.EntityId, "A removed user"),
             nameof(Resource) => resources.GetValueOrDefault(e.EntityId, "A removed resource"),
-            _ when bookings.TryGetValue(e.EntityId, out var b) =>
+            nameof(Booking) when bookings.TryGetValue(e.EntityId, out var b) =>
                 $"{b.Resource!.Name}, {CompanyTime.ToLocal(b.DeliveryAt ?? b.StartsAt, zone).ToString("d MMM yyyy HH:mm", CultureInfo.InvariantCulture)}",
-            _ => "A removed booking",
+            nameof(Booking) => "A removed booking",
+            _ => e.EntityType,
         };
 
-        return events.Select(e => new HistoryItem(
+        var items = events.Select(e => new HistoryItem(
             CompanyTime.ToLocal(e.At, zone),
             e.ActorId is { } actor ? users.GetValueOrDefault(actor, "A removed user") : "System",
             e.EntityType,
@@ -62,6 +65,7 @@ public sealed class History(AppDb db, TimeZoneInfo zone)
             Name(e),
             HistoryLabels.Verb(e),
             Changes(e.Changes))).ToList();
+        return new HistoryPage(items, more);
     }
 
     /// <summary>The interceptor's {"Field": [old, new]} JSON as field changes, values in their JSON text.</summary>

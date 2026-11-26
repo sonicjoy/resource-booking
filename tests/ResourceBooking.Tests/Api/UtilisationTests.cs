@@ -120,4 +120,36 @@ public class UtilisationTests(DbFixture fixture) : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task A_kitchen_never_uses_more_units_in_a_day_than_it_has()
+    {
+        await using (var db = _app.Db())
+        {
+            var lunch = db.Bookings.Single(b => b.ResourceId == Seed.MainKitchenId);
+            foreach (var unit in new[] { 1, 2 })
+            {
+                db.Bookings.Add(new Booking
+                {
+                    Id = Guid.CreateVersion7(),
+                    ResourceId = Seed.MainKitchenId,
+                    UserId = Seed.BenId,
+                    Attendees = 4,
+                    Status = BookingStatus.Confirmed,
+                    StartsAt = lunch.StartsAt,
+                    EndsAt = lunch.EndsAt,
+                    BlockedUntil = lunch.BlockedUntil,
+                    UnitNo = unit,
+                    DeliveryAt = lunch.DeliveryAt,
+                    DeliveryRoomId = lunch.DeliveryRoomId,
+                });
+            }
+            db.Resources.Single(r => r.Id == Seed.MainKitchenId).Units = 1;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var kitchen = (await ReportAsync()).Single(r => r.ResourceId == Seed.MainKitchenId);
+
+        Assert.Equal((7.0, 1.0), (kitchen.Available, kitchen.Used));
+    }
 }

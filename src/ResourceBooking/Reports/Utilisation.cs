@@ -34,8 +34,11 @@ public sealed class Utilisation(AppDb db, TimeZoneInfo zone)
             var own = byResource[resource.Id].ToList();
             if (resource.Type == ResourceType.Catering)
             {
-                var dayStarts = days.Select(d => CompanyTime.StartOfDay(d, zone)).ToHashSet();
-                double orders = own.Count(b => dayStarts.Contains(b.StartsAt));
+                // Orders per local day, capped at the kitchen's units in case they were lowered after a busy day.
+                var counted = days.ToHashSet();
+                double orders = own.GroupBy(b => CompanyTime.LocalDate(b.StartsAt, zone))
+                    .Where(g => counted.Contains(g.Key))
+                    .Sum(g => Math.Min(g.Count(), resource.Units));
                 double unitDays = resource.Units * days.Count;
                 return Row(resource, orders, unitDays, "unit-days");
             }

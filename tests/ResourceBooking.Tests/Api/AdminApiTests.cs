@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ResourceBooking.Data;
 using ResourceBooking.Data.Entities;
+using ResourceBooking.Reports;
 using ResourceBooking.Shared;
 using ResourceBooking.Shared.Dtos;
 using ResourceBooking.Tests.Infrastructure;
@@ -299,7 +300,7 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
         _app.Clock.Advance(TimeSpan.FromMinutes(1));
         (await sam.PostAsJsonAsync("/api/resources", PoolCar2, Ct)).EnsureSuccessStatusCode();
 
-        var history = (await sam.GetFromJsonAsync<List<HistoryItem>>("/api/history?from=2026-11-25&to=2026-11-25", Ct))!;
+        var history = (await sam.GetFromJsonAsync<HistoryPage>("/api/history?from=2026-11-25&to=2026-11-25", Ct))!.Items;
 
         Assert.Equal([("Resource", "Pool Car 2", "added", "Sam"), ("User", "Cara", "added", "Sam")],
             history.Take(2).Select(h => (h.EntityType, h.Entity, h.Verb, h.Actor)));
@@ -312,8 +313,8 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
         var sam = await SamAsync();
         (await sam.PostAsJsonAsync($"/api/resources/{Seed.SevernId}/retirement", new { lastDay = Tomorrow }, Ct)).EnsureSuccessStatusCode();
 
-        var severn = (await sam.GetFromJsonAsync<List<HistoryItem>>($"/api/history?entityType=Resource&entityId={Seed.SevernId}", Ct))!;
-        var bookings = (await sam.GetFromJsonAsync<List<HistoryItem>>("/api/history?entityType=Booking&from=2026-11-25&to=2026-11-25", Ct))!;
+        var severn = (await sam.GetFromJsonAsync<HistoryPage>($"/api/history?entityType=Resource&entityId={Seed.SevernId}", Ct))!.Items;
+        var bookings = (await sam.GetFromJsonAsync<HistoryPage>("/api/history?entityType=Booking&from=2026-11-25&to=2026-11-25", Ct))!.Items;
 
         Assert.Equal("retired", severn[0].Verb);
         Assert.All(severn, h => Assert.Equal(Seed.SevernId, h.EntityId));
@@ -327,8 +328,140 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
     {
         var sam = await SamAsync();
 
-        var history = (await sam.GetFromJsonAsync<List<HistoryItem>>($"/api/history?entityType=User&entityId={Seed.AnaId}", Ct))!;
+        var history = (await sam.GetFromJsonAsync<HistoryPage>($"/api/history?entityType=User&entityId={Seed.AnaId}", Ct))!.Items;
 
         Assert.Equal(("added", "System"), (history.Single().Verb, history.Single().Actor));
+    }
+
+    // ---- review round 1 ----
+
+    [Fact]
+    public async Task History_says_when_it_stops_short_of_everything_that_matched()
+    {
+        await using (var db = _app.Db())
+        {
+            db.AuditEvents.AddRange(Enumerable.Range(0, History.Limit + 1).Select(i => new AuditEvent
+            {
+                Id = Guid.CreateVersion7(),
+                At = _app.Clock.GetUtcNow(),
+                EntityType = "Resource",
+                EntityId = Seed.ThamesId,
+                Action = "Modified",
+                Changes = "{\"Capacity\":[8,8]}",
+            }));
+            await db.SaveChangesAsync(Ct);
+        }
+        var sam = await SamAsync();
+
+        var all = (await sam.GetFromJsonAsync<HistoryPage>("/api/history", Ct))!;
+        var ana = (await sam.GetFromJsonAsync<HistoryPage>($"/api/history?entityType=User&entityId={Seed.AnaId}", Ct))!;
+
+        Assert.Equal((History.Limit, true), (all.Items.Count, all.More));
+        Assert.Equal((1, false), (ana.Items.Count, ana.More));
+    }
+
+    [Fact]
+    public async Task A_retirement_and_a_deactivation_at_once_cancel_each_booking_once()
+    {
+        var ben = await _app.SignedInAsync(Seed.BenId);
+        for (var day = 27; day <= 30; day++)
+        {
+            (await ben.PostAsJsonAsync("/api/bookings",
+                new { resourceId = Seed.SevernId, start = $"2026-11-{day}T14:00", end = $"2026-11-{day}T15:00", attendees = 2 }, Ct)).EnsureSuccessStatusCode();
+        }
+        var sam = await SamAsync();
+
+        var results = await Task.WhenAll(
+            sam.PostAsJsonAsync($"/api/resources/{Seed.SevernId}/retirement", new { lastDay = Tomorrow }, Ct),
+            sam.PostAsync($"/api/users/{Seed.BenId}/deactivation", null, Ct));
+
+        var counts = await Task.WhenAll(results.Select(async r => (await r.Content.ReadFromJsonAsync<CascadeResult>(Ct))!.Cancelled));
+        await using var db = _app.Db();
+        var cancelled = await db.Bookings.Where(b => b.Status == BookingStatus.Cancelled).Select(b => b.Id).ToListAsync(Ct);
+        Assert.Equal(cancelled.Count, counts.Sum());
+        var cancelEvents = await db.AuditEvents.CountAsync(e => e.Action == "Modified" && cancelled.Contains(e.EntityId), Ct);
+        Assert.Equal(cancelled.Count, cancelEvents);
+    }
+
+    [Fact]
+    public async Task A_booking_racing_a_retirement_never_runs_across_the_last_day()
+    {
+        var sam = await SamAsync();
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        for (var round = 0; round < 5; round++)
+        {
+            var created = await sam.PostAsJsonAsync("/api/resources", new
+            {
+                name = $"Race car {round}",
+                type = "Car",
+                capacity = 4,
+                maxDuration = "3.00:00:00",
+            }, Ct);
+            var car = (await created.Content.ReadFromJsonAsync<ResourceDto>(Ct))!;
+
+            await Task.WhenAll(
+                ana.PostAsJsonAsync("/api/bookings", new { resourceId = car.Id, start = "2026-11-27T09:00", end = "2026-11-29T09:00", attendees = 2 }, Ct),
+                sam.PostAsJsonAsync($"/api/resources/{car.Id}/retirement", new { lastDay = "2026-11-27" }, Ct));
+
+            await using var db = _app.Db();
+            var retired = (await db.Resources.SingleAsync(r => r.Id == car.Id, Ct)).LastDay is not null;
+            var across = await db.Bookings.AnyAsync(b => b.ResourceId == car.Id && b.Status == BookingStatus.Confirmed, Ct);
+            Assert.False(retired && across, $"round {round}: retired with a booking running past the last day");
+        }
+    }
+
+    [Fact]
+    public async Task Retiring_a_kitchen_keeps_orders_on_its_last_day_and_cancels_later_ones()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        object Order(string day) => new { resourceId = Seed.MainKitchenId, deliveryAt = $"{day}T12:30", attendees = 4, deliveryRoomId = Seed.ThamesId };
+        var last = (await (await ana.PostAsJsonAsync("/api/bookings", Order(Tomorrow), Ct)).Content.ReadFromJsonAsync<BookingDto>(Ct))!;
+        var after = (await (await ana.PostAsJsonAsync("/api/bookings", Order("2026-11-27"), Ct)).Content.ReadFromJsonAsync<BookingDto>(Ct))!;
+        var sam = await SamAsync();
+
+        (await sam.PostAsJsonAsync($"/api/resources/{Seed.MainKitchenId}/retirement", new { lastDay = Tomorrow }, Ct)).EnsureSuccessStatusCode();
+
+        await using var db = _app.Db();
+        Assert.Equal(BookingStatus.Confirmed, (await db.Bookings.SingleAsync(b => b.Id == last.Id, Ct)).Status);
+        Assert.Equal(BookingStatus.Cancelled, (await db.Bookings.SingleAsync(b => b.Id == after.Id, Ct)).Status);
+    }
+
+    [Fact]
+    public async Task A_retirement_without_a_last_day_or_a_resource_without_a_type_is_400()
+    {
+        var sam = await SamAsync();
+
+        var retirement = await sam.PostAsJsonAsync($"/api/resources/{Seed.SevernId}/retirement", new { }, Ct);
+        var resource = await sam.PostAsJsonAsync("/api/resources", new { name = "Typeless", capacity = 4 }, Ct);
+
+        Assert.Equal((HttpStatusCode.BadRequest, HttpStatusCode.BadRequest), (retirement.StatusCode, resource.StatusCode));
+    }
+
+    [Fact]
+    public async Task Renaming_to_a_name_or_email_in_use_is_409_duplicate()
+    {
+        var sam = await SamAsync();
+
+        var user = await sam.PutAsJsonAsync($"/api/users/{Seed.BenId}", new { email = "ANA@sonicjoy-solutions.com", displayName = "Ben" }, Ct);
+        var resource = await sam.PutAsJsonAsync($"/api/resources/{Seed.SevernId}", new { name = "Thames", type = "MeetingRoom", capacity = 12 }, Ct);
+
+        Assert.Equal(("DUPLICATE", "DUPLICATE"), (await CodeAsync(user), await CodeAsync(resource)));
+    }
+
+    [Fact]
+    public async Task Every_admin_write_appears_in_history_under_the_admin()
+    {
+        var sam = await SamAsync();
+        (await sam.PutAsJsonAsync($"/api/users/{Seed.AnaId}", new { email = "ana@sonicjoy-solutions.com", displayName = "Ana B" }, Ct)).EnsureSuccessStatusCode();
+        (await sam.PutAsJsonAsync($"/api/resources/{Seed.SevernId}", new { name = "Severn", type = "MeetingRoom", capacity = 14 }, Ct)).EnsureSuccessStatusCode();
+        (await sam.PostAsync($"/api/users/{Seed.BenId}/deactivation", null, Ct)).EnsureSuccessStatusCode();
+
+        var history = (await sam.GetFromJsonAsync<HistoryPage>("/api/history?from=2026-11-25&to=2026-11-25", Ct))!.Items
+            .Where(h => h.Actor == "Sam").ToList();
+
+        Assert.Contains(history, h => (h.Entity, h.Verb) == ("Ana B", "changed") && h.Changes.Any(c => c == new FieldChange("DisplayName", "Ana", "Ana B")));
+        Assert.Contains(history, h => (h.Entity, h.Verb) == ("Severn", "changed") && h.Changes.Any(c => c == new FieldChange("Capacity", "12", "14")));
+        Assert.Contains(history, h => (h.Entity, h.Verb) == ("Ben", "deactivated"));
+        Assert.Equal(2, history.Count(h => h.EntityType == "Booking" && h.Verb == "cancelled"));
     }
 }

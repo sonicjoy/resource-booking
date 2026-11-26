@@ -35,7 +35,11 @@ public static class ResourceEndpoints
 
         resources.MapPost("/{id:guid}/retirement", async (Guid id, RetirementRequest request, HttpContext http, ResourceAdmin admin, CancellationToken ct) =>
         {
-            var result = await admin.RetireAsync(id, request.LastDay, http.User.UserId()!.Value, ct);
+            if (ApiResults.Invalid(request) is { } invalid)
+            {
+                return invalid;
+            }
+            var result = await admin.RetireAsync(id, request.LastDay!.Value, http.User.UserId()!.Value, ct);
             return result.Error is { } error ? ApiResults.Problem(error) : Results.Ok(result.Value);
         });
 

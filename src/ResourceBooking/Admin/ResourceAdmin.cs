@@ -19,7 +19,7 @@ public sealed class ResourceAdmin(AppDb db, BookingService bookings, TimeProvide
 
     public async Task<AdminResult<Resource>> AddAsync(ResourceRequest request, CancellationToken ct)
     {
-        var resource = new Resource { Id = Guid.CreateVersion7(), Name = "", Type = request.Type };
+        var resource = new Resource { Id = Guid.CreateVersion7(), Name = "", Type = request.Type!.Value };
         Apply(request, resource);
         db.Resources.Add(resource);
         return await SaveAsync(resource, ct);
