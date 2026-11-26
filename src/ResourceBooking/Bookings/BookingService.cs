@@ -132,6 +132,12 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         resource = await LockResourceAsync(resource.Id, ct);
+        if (request.DeliveryRoomId is { } room)
+        {
+            // The insert would take this key lock on the delivery room anyway; taking it now keeps every
+            // write's lock order the same: resources, then users, then bookings (formal/AdminLocks.tla).
+            await db.Database.ExecuteSqlAsync($"SELECT 1 FROM resources WHERE id = {room} FOR KEY SHARE", ct);
+        }
         if (await LockCallerAsync(callerId, ct) is { } inactive)
         {
             return inactive;

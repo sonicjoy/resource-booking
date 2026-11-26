@@ -231,7 +231,9 @@ The endpoints validate the request's shape before `BookingService` runs. `Bookin
 
 **Cancel** runs steps 1 to 3, then sets `status = Cancelled` and fills `cancel_reason`. Rows are never deleted, except by reseed.
 
-**Cascades.** `BookingService.CancelFutureBookings(filter, reason)` loads the bookings and changes them one at a time, because bulk updates bypass the audit interceptor. It writes a notice to each owner who is active and is not the person making the change.
+**Lock order.** Every write takes row locks in one order: resources, then users, then bookings, each set in id order. A catering order locks its delivery room (FOR KEY SHARE) right after the kitchen, before the caller; otherwise the insert's foreign key would take it last and could deadlock with an edit and a deactivation. `formal/AdminLocks.tla` model-checks this order with TLC.
+
+**Cascades.** `BookingService.CancelFutureBookings(filter, reason)` locks the matching bookings in id order, re-checks that each is still confirmed, and changes them one at a time, because bulk updates bypass the audit interceptor. It writes a notice to each owner who is active and is not the person making the change.
 
 * **Retirement:** locks the resource. A `lastDay` before today returns 422 `LAST_DAY_PAST`. A confirmed booking running across `lastDay` returns 422 `IN_USE`. Otherwise it sets `last_day` and cancels the bookings after it.
 * **Deactivation:** locks the target and every active admin row with `FOR NO KEY UPDATE`. Removing the last active admin returns 422 `LAST_ADMIN`; demotion through `PUT` applies the same check. Deactivation then clears `is_active` and cancels the user's future bookings.
@@ -278,7 +280,7 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 | `GET /api/users`, `GET /api/users/{id}`, `POST /api/users`, `PUT /api/users/{id}` | admin | `PUT` cannot change `is_active`. |
 | `POST /api/users/{id}/deactivation` | admin | 200 with the number of bookings cancelled. |
 | `GET /api/reports/utilisation?from&to` | admin | Ratio per resource. |
-| `GET /api/history?entityType&entityId&from&to` | admin | Audit events, described in words. |
+| `GET /api/history?entityType&entityId&from&to` | admin | `{items, more}`: up to 500 audit events, newest first, described in words; `more` is true when older matching events were left out. |
 | `GET /api/notices`, `POST /api/notices/{id}/read` | signed in | The caller's notices. |
 | `POST /api/assistant/messages` `{conversationId?, text}` | signed in | Reply text and any open proposals. |
 | `GET /api/assistant/traces?from&to`, `GET /api/assistant/traces/{conversationId}` | admin | Traces and their steps. |

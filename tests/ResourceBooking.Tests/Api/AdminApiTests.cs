@@ -333,7 +333,7 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
         Assert.Equal(("added", "System"), (history.Single().Verb, history.Single().Actor));
     }
 
-    // ---- review round 1 ----
+    // ---- concurrency, limits and history ----
 
     [Fact]
     public async Task History_says_when_it_stops_short_of_everything_that_matched()
@@ -463,5 +463,30 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
         Assert.Contains(history, h => (h.Entity, h.Verb) == ("Severn", "changed") && h.Changes.Any(c => c == new FieldChange("Capacity", "12", "14")));
         Assert.Contains(history, h => (h.Entity, h.Verb) == ("Ben", "deactivated"));
         Assert.Equal(2, history.Count(h => h.EntityType == "Booking" && h.Verb == "cancelled"));
+    }
+
+    [Fact]
+    public async Task Editing_a_user_without_a_role_keeps_the_role_they_have()
+    {
+        var sam = await SamAsync();
+        var dee = (await (await sam.PostAsJsonAsync("/api/users", new { email = "dee@sonicjoy-solutions.com", displayName = "Dee", role = "Admin" }, Ct))
+            .Content.ReadFromJsonAsync<UserDto>(Ct))!;
+
+        var response = await sam.PutAsJsonAsync($"/api/users/{dee.Id}", new { email = "dee@sonicjoy-solutions.com", displayName = "Dee Two" }, Ct);
+
+        Assert.Equal(Role.Admin, (await response.Content.ReadFromJsonAsync<UserDto>(Ct))!.Role);
+    }
+
+    [Fact]
+    public async Task A_cascade_tells_the_owners_but_not_the_admin_who_made_the_change()
+    {
+        var sam = await SamAsync();
+        (await sam.PostAsJsonAsync("/api/bookings",
+            new { resourceId = Seed.SevernId, start = "2026-11-30T14:00", end = "2026-11-30T15:00", attendees = 4 }, Ct)).EnsureSuccessStatusCode();
+
+        (await sam.PostAsJsonAsync($"/api/resources/{Seed.SevernId}/retirement", new { lastDay = Tomorrow }, Ct)).EnsureSuccessStatusCode();
+
+        await using var db = _app.Db();
+        Assert.Equal([Seed.AnaId], await db.Notices.Select(n => n.UserId).ToListAsync(Ct));
     }
 }

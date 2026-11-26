@@ -34,7 +34,7 @@ public sealed class UserAdmin(AppDb db, BookingService bookings)
             Id = Guid.CreateVersion7(),
             Email = Normalise(request.Email),
             DisplayName = request.DisplayName.Trim(),
-            Role = request.Role,
+            Role = request.Role ?? Role.Employee,
             IsActive = true,
         };
         db.Users.Add(user);
@@ -49,13 +49,14 @@ public sealed class UserAdmin(AppDb db, BookingService bookings)
         {
             return ApiError.NotFound("No such user");
         }
-        if (user is { Role: Role.Admin, IsActive: true } && request.Role != Role.Admin && ActiveAdmins(locked) <= 1)
+        var role = request.Role ?? user.Role;
+        if (user is { Role: Role.Admin, IsActive: true } && role != Role.Admin && ActiveAdmins(locked) <= 1)
         {
             return LastAdmin;
         }
         user.Email = Normalise(request.Email);
         user.DisplayName = request.DisplayName.Trim();
-        user.Role = request.Role;
+        user.Role = role;
         var result = await SaveAsync(user, ct);
         if (result.Error is null)
         {

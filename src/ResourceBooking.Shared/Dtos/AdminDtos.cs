@@ -13,7 +13,8 @@ public sealed class UserRequest
     [Required, StringLength(100, MinimumLength = 1)]
     public string DisplayName { get; set; } = "";
 
-    public Role Role { get; set; } = Role.Employee;
+    /// <summary>Employee when adding a user; left as it is when editing one.</summary>
+    public Role? Role { get; set; }
 }
 
 /// <summary>
@@ -89,7 +90,9 @@ public sealed record CascadeResult(int Cancelled);
 
 /// <summary>
 /// One resource's use over a date range. Rooms and cars count hours booked over hours open; kitchens count
-/// orders (unit-days) over units times days. Ratio is null when the resource had no open time in the range.
+/// orders (unit-days) over units times days, counting at most the kitchen's current units on any day (so a day
+/// whose orders outnumber units lowered since shows as full, not over 100%). Ratio is null when the resource had
+/// no open time in the range.
 /// </summary>
 public sealed record UtilisationRow(Guid ResourceId, string Name, ResourceType Type, DateOnly? LastDay, double Used, double Available, string Unit, double? Ratio);
 
