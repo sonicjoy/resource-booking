@@ -569,9 +569,31 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     [InlineData("   ")]
     public async Task An_empty_title_against_a_proposal_without_one_is_not_a_change(string title)
     {
-        var (_, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: title);
+        var (booking, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: title);
 
         Assert.False(proposal.ChangedBeforeConfirm);
+        Assert.Null(booking.Title);
+    }
+
+    [Fact]
+    public async Task A_booking_sent_with_a_proposal_another_request_holds_goes_ahead_unlinked_without_waiting()
+    {
+        var proposalId = await ProposalAsync(Seed.AnaId);
+        await using var holder = _app.Db();
+        await using var hold = await holder.Database.BeginTransactionAsync(Ct);
+        await holder.Database.ExecuteSqlAsync($"SELECT 1 FROM proposals WHERE id = {proposalId} FOR UPDATE", Ct);
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        var response = await ana.PostAsJsonAsync("/api/bookings",
+            new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees = 6, proposalId }, timeout.Token);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var id = (await response.Content.ReadFromJsonAsync<BookingDto>(Ct))!.Id;
+        await hold.RollbackAsync(Ct);
+        await using var db = _app.Db();
+        Assert.Null((await db.Bookings.SingleAsync(b => b.Id == id, Ct)).ProposalId);
     }
 
     [Fact]
