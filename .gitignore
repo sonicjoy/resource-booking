@@ -486,3 +486,7 @@ $RECYCLE.BIN/
 
 # Mutation test runs
 StrykerOutput/
+
+# TLC run output
+formal/*_TTrace_*
+formal/states/

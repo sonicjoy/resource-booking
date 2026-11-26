@@ -7,14 +7,15 @@
 (* reads under them, writes, and releases everything at commit.             *)
 (*                                                                         *)
 (* Checked: no deadlock; at least one active admin; each booking cancelled  *)
-(* at most once; no confirmed booking on a retired resource.               *)
+(* at most once; no order created for a room already retired; no confirmed *)
+(* booking whose owner is inactive.                                        *)
 (* The two switches turn on mistakes a programmer might make, to show the  *)
 (* checker finds them: locking only the target user on deactivation, and   *)
 (* cascading without locking and re-checking the bookings.                 *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS LockOnlyTarget, CascadeWithoutLocks, OldOrder
+CONSTANTS LockOnlyTarget, CascadeWithoutLocks, OldOrder, OrderChecksEarly, OrderWithoutCallerLock
 
 Admins == {"u1", "u2"}
 Users == Admins
@@ -44,7 +45,8 @@ Txns == {"edit", "order", "retire", "deact1", "deact2"}
 FirstLocks(t) ==
     CASE t = "edit"   -> << L("r1", "U"), L("u1", "S"), L("b1", "U") >>
       [] t = "order"  -> IF OldOrder THEN << L(Kitchen, "U"), L("u2", "S"), L("r1", "KS") >>
-                                      ELSE << L(Kitchen, "U"), L("r1", "KS"), L("u2", "S") >>
+                         ELSE IF OrderWithoutCallerLock THEN << L(Kitchen, "U"), L("r1", "KS") >>
+                         ELSE << L(Kitchen, "U"), L("r1", "KS"), L("u2", "S") >>
       [] t = "retire" -> << L("r1", "U") >>
       [] t = "deact1" -> IF LockOnlyTarget THEN << L("u1", "NKU") >> ELSE << L("u1", "NKU"), L("u2", "NKU") >>
       [] t = "deact2" -> IF LockOnlyTarget THEN << L("u2", "NKU") >> ELSE << L("u1", "NKU"), L("u2", "NKU") >>
@@ -60,9 +62,11 @@ VARIABLES
     confirmed,  \* bookings that are confirmed
     cancels,    \* b -> number of times cancelled
     active,     \* active users
-    retired     \* retired resources
+    retired,    \* retired resources
+    seen,       \* what the order read about its room and caller before taking any lock
+    badOrder    \* an order was created for a room already retired
 
-vars == << phase, todo, held, picked, exists, confirmed, cancels, active, retired >>
+vars == << phase, todo, held, picked, exists, confirmed, cancels, active, retired, seen, badOrder >>
 
 Init ==
     /\ phase = [t \in Txns |-> "locking"]
@@ -74,6 +78,8 @@ Init ==
     /\ cancels = [b \in Booked |-> 0]
     /\ active = Users
     /\ retired = {}
+    /\ seen = [retired |-> {}, active |-> Users]
+    /\ badOrder = FALSE
 
 Free(t, lock) == \A o \in Txns \ {t} : \A h \in held[o] : h.row = lock.row => ~Conflict(h.mode, lock.mode)
 
@@ -84,7 +90,8 @@ Take(t) ==
     /\ Free(t, Head(todo[t]))
     /\ held' = [held EXCEPT ![t] = @ \cup {Head(todo[t])}]
     /\ todo' = [todo EXCEPT ![t] = Tail(@)]
-    /\ UNCHANGED << phase, picked, exists, confirmed, cancels, active, retired >>
+    /\ seen' = IF t = "order" /\ held[t] = {} THEN [retired |-> retired, active |-> active] ELSE seen
+    /\ UNCHANGED << phase, picked, exists, confirmed, cancels, active, retired, badOrder >>
 
 Release(t) == held' = [held EXCEPT ![t] = {}]
 
@@ -117,24 +124,28 @@ Commit(t) ==
     /\ todo[t] = << >>
     /\ CASE t = "edit" ->
               /\ phase' = [phase EXCEPT ![t] = "done"] /\ Release(t)
-              /\ UNCHANGED << todo, picked, exists, confirmed, cancels, active, retired >>
+              /\ UNCHANGED << todo, picked, exists, confirmed, cancels, active, retired, seen, badOrder >>
          [] t = "order" ->
               \* Refused if the caller is inactive or the delivery room retired; otherwise b3 is created.
               /\ phase' = [phase EXCEPT ![t] = "done"] /\ Release(t)
-              /\ IF "u2" \in active /\ "r1" \notin retired
+              \* The code reads the room and the caller under their locks; OrderChecksEarly reads them before.
+              /\ LET r == IF OrderChecksEarly THEN seen.retired ELSE retired
+                     a == IF OrderChecksEarly THEN seen.active ELSE active IN
+                 IF "u2" \in a /\ "r1" \notin r
                     THEN /\ exists' = exists \cup {"b3"} /\ confirmed' = confirmed \cup {"b3"}
-                    ELSE UNCHANGED << exists, confirmed >>
-              /\ UNCHANGED << todo, picked, cancels, active, retired >>
+                         /\ badOrder' = ("r1" \in retired)
+                    ELSE UNCHANGED << exists, confirmed, badOrder >>
+              /\ UNCHANGED << todo, picked, cancels, active, retired, seen >>
          [] t = "retire" ->
               /\ StartCascade(t, {b \in confirmed : ResourceOf[b] = "r1"})
-              /\ UNCHANGED << held, exists, confirmed, cancels, active, retired >>
+              /\ UNCHANGED << held, exists, confirmed, cancels, active, retired, seen, badOrder >>
          [] t \in {"deact1", "deact2"} ->
               \* LAST_ADMIN: count active admins as read now (under the locks, unless the mistake is on).
               IF Target(t) \in active /\ Cardinality(active \cap Admins) <= 1
                   THEN /\ phase' = [phase EXCEPT ![t] = "done"] /\ Release(t)
-                       /\ UNCHANGED << todo, picked, exists, confirmed, cancels, active, retired >>
+                       /\ UNCHANGED << todo, picked, exists, confirmed, cancels, active, retired, seen, badOrder >>
                   ELSE /\ StartCascade(t, {b \in confirmed : OwnerOf[b] = Target(t)})
-                       /\ UNCHANGED << held, exists, confirmed, cancels, active, retired >>
+                       /\ UNCHANGED << held, exists, confirmed, cancels, active, retired, seen, badOrder >>
 
 FinishCascade(t) ==
     /\ phase[t] = "cascade"
@@ -144,7 +155,7 @@ FinishCascade(t) ==
     /\ active' = IF t \in {"deact1", "deact2"} THEN active \ {Target(t)} ELSE active
     /\ phase' = [phase EXCEPT ![t] = "done"]
     /\ Release(t)
-    /\ UNCHANGED << todo, picked, exists >>
+    /\ UNCHANGED << todo, picked, exists, seen, badOrder >>
 
 Done == /\ \A t \in Txns : phase[t] = "done"
         /\ UNCHANGED vars
@@ -156,5 +167,6 @@ Spec == Init /\ [][Next]_vars
 
 AtLeastOneAdmin == active \cap Admins # {}
 CancelledOnce == \A b \in Booked : cancels[b] <= 1
-NothingOnARetiredResource == \A b \in confirmed : ResourceOf[b] \notin retired \/ b \notin exists
+NoOrderForARetiredRoom == ~badOrder
+NoBookingForAnInactiveOwner == \A b \in confirmed : OwnerOf[b] \in active
 ====

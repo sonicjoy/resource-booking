@@ -136,7 +136,14 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         {
             // The insert would take this key lock on the delivery room anyway; taking it now keeps every
             // write's lock order the same: resources, then users, then bookings (formal/AdminLocks.tla).
-            await db.Database.ExecuteSqlAsync($"SELECT 1 FROM resources WHERE id = {room} FOR KEY SHARE", ct);
+            // Re-read the room's last day under it: the room may have been retired while this order waited.
+            var lastDay = await db.Database
+                .SqlQuery<DateOnly?>($"SELECT last_day AS \"Value\" FROM resources WHERE id = {room} FOR KEY SHARE")
+                .SingleAsync(ct);
+            if (lastDay is { } last && last < DateOnly.FromDateTime(request.DeliveryAt!.Value))
+            {
+                return ApiError.BadRequest("Catering must be delivered to an active meeting room");
+            }
         }
         if (await LockCallerAsync(callerId, ct) is { } inactive)
         {
