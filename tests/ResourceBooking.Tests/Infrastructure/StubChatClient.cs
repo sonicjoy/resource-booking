@@ -19,6 +19,11 @@ public sealed class StubChatClient : IChatClient
     /// <summary>Waits before answering, to test timeouts.</summary>
     public TimeSpan Delay { get; set; }
 
+    public enum UsageReport { Full, NoTotal, None }
+
+    /// <summary>How each response reports its token usage: in full, without a total, or not at all.</summary>
+    public UsageReport Usage { get; set; }
+
     /// <summary>Asks for the scripted tool calls on every call, never replying, to test the loop cap.</summary>
     public bool NeverReply { get; set; }
 
@@ -55,7 +60,12 @@ public sealed class StubChatClient : IChatClient
             throw failure;
         }
 
-        var usage = new UsageDetails { InputTokenCount = TokensPerCall / 2, OutputTokenCount = TokensPerCall - TokensPerCall / 2, TotalTokenCount = TokensPerCall };
+        var usage = Usage switch
+        {
+            UsageReport.None => null,
+            UsageReport.NoTotal => new UsageDetails { InputTokenCount = TokensPerCall / 2, OutputTokenCount = TokensPerCall - TokensPerCall / 2 },
+            _ => new UsageDetails { InputTokenCount = TokensPerCall / 2, OutputTokenCount = TokensPerCall - TokensPerCall / 2, TotalTokenCount = TokensPerCall },
+        };
         var lastUser = list.Last(m => m.Role == ChatRole.User).Text;
         var script = _scripts.LastOrDefault(s => s.Matches(lastUser)).Script ?? new Script([], "I can help with rooms, cars and catering.");
 

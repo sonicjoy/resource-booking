@@ -520,6 +520,60 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         Assert.DoesNotContain("You help Ana", calls[1]);
     }
 
+    [Theory]
+    [InlineData(StubChatClient.UsageReport.Full, 100L)]
+    [InlineData(StubChatClient.UsageReport.NoTotal, 100L)]
+    public async Task A_call_is_charged_what_it_reports_with_or_without_a_total(StubChatClient.UsageReport report, long expected)
+    {
+        _app.Model.Usage = report;
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "hello"));
+
+        await using var db = _app.Db();
+        Assert.Equal(expected, (await db.TokenUsage.SingleAsync(Ct)).Tokens);
+    }
+
+    [Fact]
+    public async Task A_call_that_reports_no_usage_keeps_its_reservation()
+    {
+        _app.Model.Usage = StubChatClient.UsageReport.None;
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "hello"));
+
+        // Nothing says what it cost, so the upper bound stands: the output cap plus the input's bytes.
+        await using var db = _app.Db();
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens > 800);
+    }
+
+    [Fact]
+    public async Task A_call_that_uses_more_than_it_reserved_is_charged_in_full()
+    {
+        _app.Model.TokensPerCall = 50_000;
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "hello"));
+
+        await using var db = _app.Db();
+        Assert.Equal(50_000, (await db.TokenUsage.SingleAsync(Ct)).Tokens);
+    }
+
+    [Fact]
+    public async Task A_tool_that_fails_is_traced_with_its_error_and_the_turn_still_answers()
+    {
+        _app.Model.On("move", "Sorry, I couldn't.", Call("propose_change", new { bookingId = "not-a-guid" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "move my booking"));
+
+        Assert.Equal("Sorry, I couldn't.", reply.Text);
+        await using var db = _app.Db();
+        var tool = await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct);
+        Assert.Contains("\"error\"", tool.Payload);
+        Assert.Contains("propose_change", tool.Payload);
+    }
+
     // ---- level 3: a proposal is offered exactly when the same request would book ----
 
     [Fact]
