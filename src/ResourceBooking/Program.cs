@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using ResourceBooking.Auth;
 using ResourceBooking.Components;
 using ResourceBooking.Data;
 using ResourceBooking.Endpoints;
@@ -15,6 +16,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddDbContext<AppDb>(options =>
     AppDb.Configure(options, builder.Configuration.GetConnectionString("Db")));
+
+builder.Services.AddAppAuthentication(builder.Environment);
+builder.Services.AddApiGuards();
+builder.Services.AddProblemDetails();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -47,11 +52,22 @@ else
     app.UseHsts();
 }
 
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// Pages get the not-found page; API calls keep their own status code.
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"), pages =>
+    pages.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapHealthEndpoints();
+
+// Every /api endpoint requires a signed-in user unless it opts out with AllowAnonymous,
+// and refuses a state-changing request from another site.
+var api = app.MapGroup("/api").RequireAuthorization().RequireSameOrigin();
+api.MapAuthEndpoints();
+api.MapAdminEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
     .AddAdditionalAssemblies(typeof(ResourceBooking.Client._Imports).Assembly);

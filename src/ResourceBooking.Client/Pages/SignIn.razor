@@ -1,0 +1,77 @@
+@page "/sign-in"
+@inject HttpClient Http
+@inject MeAuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in</PageTitle>
+
+<h1>Sign in</h1>
+<p class="hint">Demo sign-in, standing in for company SSO. Pick who you want to be.</p>
+
+@if (options is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    @foreach (var group in options.GroupBy(o => o.Role).OrderBy(g => g.Key == Role.Admin ? 0 : 1))
+    {
+        <h2>@(group.Key == Role.Admin ? "Admins" : "Employees")</h2>
+        <ul class="people">
+            @foreach (var person in group)
+            {
+                <li>
+                    <button type="button" @onclick="() => SignInAsync(person.Id)">
+                        @person.DisplayName <span class="email">@person.Email</span>
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@if (error is not null)
+{
+    <p role="alert">@error</p>
+}
+
+@code {
+    private List<SignInOption>? options;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            options = await Http.GetFromJsonAsync<List<SignInOption>>("api/auth/sign-in-options");
+        }
+        catch (HttpRequestException)
+        {
+            options = [];
+            error = "The sign-in list couldn't be loaded. Refresh to try again.";
+        }
+    }
+
+    private async Task SignInAsync(Guid userId)
+    {
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.PostAsJsonAsync("api/auth/sign-in", new SignInRequest(userId));
+        }
+        catch (HttpRequestException)
+        {
+            error = "Signing in didn't work. Try again.";
+            return;
+        }
+        if (!response.IsSuccessStatusCode)
+        {
+            error = response.StatusCode == System.Net.HttpStatusCode.NotFound
+                ? "That person can no longer sign in."
+                : "Signing in didn't work. Try again.";
+            return;
+        }
+        AuthState.Refresh();
+        Navigation.NavigateTo("/");
+    }
+}

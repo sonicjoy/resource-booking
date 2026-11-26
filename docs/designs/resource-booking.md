@@ -281,7 +281,7 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 | `GET /api/notices`, `POST /api/notices/{id}/read` | signed in | The caller's notices. |
 | `POST /api/assistant/messages` `{conversationId?, text}` | signed in | Reply text and any open proposals. |
 | `GET /api/assistant/traces?from&to`, `GET /api/assistant/traces/{conversationId}` | admin | Traces and their steps. |
-| `POST /api/admin/reseed` | admin | 204. Resets the demo data. |
+| `POST /api/admin/reseed` | admin | 204. Resets the demo data. 429 `RATE_LIMITED` with `Retry-After` when called again within the window (`Demo:ReseedWindowSeconds`, default 30, once across the app; 0 turns it off for end-to-end runs). |
 
 ### Access
 
@@ -404,7 +404,7 @@ The options rejected during ideation are in [concepts_brief.md](concepts_brief.m
 * **Overlapping deploys.** Migrations on start are safe with one replica. They also stay backward-compatible, in case Railway briefly runs the old and new containers together.
 * **Model failure.** Covered under Assistant: the panel replies with an error, and the forms keep working.
 * **Public demo.** Anyone with the link can sign in as any seeded user, including an admin. The global token budget caps model spend, and reseed restores the data.
-* **Secrets.** The OpenAI key lives in a Railway variable and in local user-secrets. It is never committed, logged or sent to the browser.
+* **Secrets.** The OpenAI key lives in a Railway variable and in local user-secrets. It is never committed, logged or sent to the browser. The Data Protection keys that sign session cookies are stored unencrypted in the app's database, so anyone who can read the database can forge a session; production would protect them with a key vault or certificate.
 * **Scale.** One office, tens of resources, hundreds of users. The row lock serialises bookings per resource only.
 
 ---

@@ -1,6 +1,7 @@
 namespace ResourceBooking.Shared;
 
 /// <summary>The rule settings an admin can set on a resource.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(NameOnlyEnumConverter<RuleField>))]
 public enum RuleField
 {
     OpeningHours,
