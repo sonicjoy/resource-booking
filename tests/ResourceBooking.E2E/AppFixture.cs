@@ -85,9 +85,38 @@ public sealed class AppFixture : IAsyncLifetime
         var context = await Browser.NewContextAsync(new() { BaseURL = BaseUrl, Locale = "en-GB", TimezoneId = browserZone });
         var page = await context.NewPageAsync();
         await page.GotoAsync("/sign-in");
-        await page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") }).ClickAsync();
+        var user = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") });
+        await WaitForSignInListAsync(page, user);
+        await user.ClickAsync();
         await page.GetByRole(AriaRole.Heading, new() { Name = "Book" }).WaitForAsync();
         return page;
+    }
+
+    /// <summary>
+    /// Waits for the sign-in list, which appears only once the WebAssembly app has downloaded and asked the server for
+    /// it. A fresh browser context downloads the app again, and twice in CI that took over 30 s, so this allows longer,
+    /// reloads once, and if the list still isn't there fails with what the page did show.
+    /// </summary>
+    private static async Task WaitForSignInListAsync(IPage page, ILocator user)
+    {
+        try
+        {
+            await user.WaitForAsync(new() { Timeout = 45_000 });
+            return;
+        }
+        catch (TimeoutException)
+        {
+            await page.ReloadAsync();
+        }
+        try
+        {
+            await user.WaitForAsync(new() { Timeout = 45_000 });
+        }
+        catch (TimeoutException e)
+        {
+            var shown = await page.Locator("body").InnerTextAsync();
+            throw new TimeoutException($"The sign-in list never appeared, even after a reload. The page showed: {shown[..Math.Min(shown.Length, 500)]}", e);
+        }
     }
 
     private sealed class Factory(string connectionString, IChatClient model) : WebApplicationFactory<Program>
