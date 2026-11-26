@@ -31,6 +31,11 @@ public class BookingRequest : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        // PostgreSQL text can't hold a NUL, so one would fail the save as a server error.
+        if (Title?.Contains('\0', StringComparison.Ordinal) == true)
+        {
+            yield return new ValidationResult("The title can't contain a NUL character.", [nameof(Title)]);
+        }
         if (DeliveryAt is not null)
         {
             yield break;

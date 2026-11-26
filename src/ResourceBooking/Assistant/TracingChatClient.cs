@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using ResourceBooking.Shared;
 
@@ -25,11 +26,21 @@ public sealed class TracingChatClient(IChatClient inner, Trace trace, TokenBudge
         var sent = list.Skip(_seen).Select(Describe).ToList();
         options = options?.Clone() ?? new ChatOptions();
         options.MaxOutputTokens = maxOutputTokens;
-        var reserved = Estimate(list) + maxOutputTokens;
+        var reserved = InputBound(list, options) + maxOutputTokens;
         var day = await budget.ReserveAsync(reserved, CancellationToken.None);
         var watch = Stopwatch.StartNew();
-        // A call that throws (timeout, abandoned request, model error) keeps its whole reservation.
-        var response = await base.GetResponseAsync(list, options, cancellationToken);
+        ChatResponse response;
+        try
+        {
+            // A call that throws (timeout, abandoned request, model error) keeps its whole reservation.
+            response = await base.GetResponseAsync(list, options, cancellationToken);
+        }
+        catch (AssistantUnavailableException)
+        {
+            // No model is configured, so nothing was sent and nothing is spent.
+            await budget.SettleAsync(day, reserved, 0, CancellationToken.None);
+            throw;
+        }
         watch.Stop();
         _seen = list.Count + response.Messages.Count;
 
@@ -46,10 +57,19 @@ public sealed class TracingChatClient(IChatClient inner, Trace trace, TokenBudge
     public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("The assistant doesn't stream.");
 
-    /// <summary>A generous guess at a call's input tokens: about one token per three characters sent, tool schemas included.</summary>
-    private static long Estimate(List<ChatMessage> messages) =>
-        700 + messages.Sum(m => (long)(m.Text?.Length ?? 0)
-            + m.Contents.OfType<FunctionResultContent>().Sum(r => (long)(r.Result?.ToString()?.Length ?? 0))) / 3;
+    /// <summary>
+    /// An upper bound on a call's input tokens for a byte-level tokenizer, where every token is at least one byte:
+    /// the UTF-8 bytes of every text, tool call, tool result and tool schema sent, plus a little per message.
+    /// </summary>
+    private static long InputBound(List<ChatMessage> messages, ChatOptions options)
+    {
+        static long Bytes(string? s) => s is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(s);
+        var sent = messages.Sum(m => 8 + Bytes(m.Text)
+            + m.Contents.OfType<FunctionCallContent>().Sum(c => Bytes(c.Name) + Bytes(JsonSerializer.Serialize(c.Arguments)))
+            + m.Contents.OfType<FunctionResultContent>().Sum(r => Bytes(r.Result is string text ? text : JsonSerializer.Serialize(r.Result))));
+        var tools = options.Tools?.OfType<AIFunction>().Sum(t => Bytes(t.Name) + Bytes(t.Description) + Bytes(t.JsonSchema.GetRawText())) ?? 0;
+        return 50 + sent + tools;
+    }
 
     private static object Describe(ChatMessage m) => new
     {

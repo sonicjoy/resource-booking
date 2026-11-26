@@ -10,7 +10,7 @@
         <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="NewConversation">New conversation</FluentButton>
         <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="OnClose">Close</FluentButton>
     </div>
-    <p class="hint">Ask in your own words, for example "a room for 8 tomorrow morning". It proposes; nothing is booked until you confirm. Conversations are recorded, and admins can read them.</p>
+    <p class="hint">Ask in your own words, for example "a room for 8 tomorrow morning". It proposes; nothing is booked until you confirm. Messages go to OpenAI and are recorded for admins to read, so leave out personal details.</p>
 
     <ol class="messages" aria-live="polite">
         @foreach (var message in messages)

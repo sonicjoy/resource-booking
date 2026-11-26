@@ -323,7 +323,7 @@ A propose tool runs the same checks as booking (`BookingService.PreviewAsync`: t
 **Limits and failures.**
 
 * **Rate limit:** 10 messages a minute per user (`Assistant:MessagesPerMinute`, 0 turns it off), with the ASP.NET Core rate limiter. Over it returns 429 `RATE_LIMITED`.
-* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Over it returns 429 `BUDGET_EXHAUSTED`.
+* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Each call first reserves an upper bound (its input's UTF-8 bytes plus `Assistant:MaxOutputTokens`, default 800, which is also sent as the call's output cap) and settles to the reported usage afterwards; a call that fails or is abandoned keeps its reservation. Over the budget returns 429 `BUDGET_EXHAUSTED`.
 * **Model timeout or error:** after 30 seconds (`Assistant:TimeoutSeconds`), or on any error, the panel shows a short reply that says so. The forms are unaffected.
 
 **Key.** `OpenAI:ApiKey` and `OpenAI:Model` come from config and never reach the client.
@@ -373,7 +373,7 @@ Simple layouts built from stock Fluent UI components. All times are shown in the
 * **Image:** one Dockerfile. `mcr.microsoft.com/dotnet/sdk:10.0` builds the app and `aspnet:10.0` (Debian, with time-zone data) runs it.
 * **Start-up:** the app applies migrations, then seeds the database if it is empty.
 * **Reseed:** the only bulk delete. In one transaction it empties every app table except `token_usage` and the Data Protection keys, then re-runs the seed with fixed ids. Seeded users therefore keep their sessions, and a session whose user no longer exists is rejected. Interrupting another visitor is an accepted cost.
-* **Config:** comes from environment variables: `ConnectionStrings__Db`, `OpenAI__ApiKey`, `OpenAI__Model`, `Booking__TimeZone`, and the `Assistant__*` limits (`DailyTokenBudget`, `MessagesPerMinute`, `TimeoutSeconds`, `MaxTurns`, `MaxIterations`). Without `OpenAI__ApiKey` the assistant answers that it isn't set up, and the forms work as usual.
+* **Config:** comes from environment variables: `ConnectionStrings__Db`, `OpenAI__ApiKey`, `OpenAI__Model`, `Booking__TimeZone`, and the `Assistant__*` limits (`DailyTokenBudget`, `MessagesPerMinute`, `TimeoutSeconds`, `MaxTurns`, `MaxIterations`, `MaxOutputTokens`). Without `OpenAI__ApiKey` the assistant answers that it isn't set up, and the forms work as usual.
 * **Railway:** runs one app service, pinned to one replica, and one PostgreSQL service. It deploys `main` after CI passes.
 
 ## Alternatives Considered

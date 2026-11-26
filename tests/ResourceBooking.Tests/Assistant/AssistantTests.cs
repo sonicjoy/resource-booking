@@ -472,6 +472,52 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         Assert.Equal(steps.Select(s => s.Seq).Distinct().Count(), steps.Count);
     }
 
+    [Fact]
+    public async Task With_no_model_configured_nothing_is_charged()
+    {
+        _app.Model.Failure = new ResourceBooking.Assistant.AssistantUnavailableException();
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await ReplyAsync(await SayAsync(ana, "a room please"));
+        }
+
+        await using var db = _app.Db();
+        Assert.Equal(0, await db.TokenUsage.SumAsync(t => t.Tokens, Ct));
+    }
+
+    [Fact]
+    public async Task A_title_with_a_NUL_is_not_proposed_and_not_booked()
+    {
+        _app.Model.On("a room", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees = 6, title = "Plan\0ning" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "a room please"));
+        var direct = await ana.PostAsJsonAsync("/api/bookings",
+            new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees = 6, title = "Plan\0ning" }, Ct);
+
+        Assert.Empty(reply.Proposals);
+        Assert.Equal(HttpStatusCode.BadRequest, direct.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_later_turns_model_call_records_only_that_turns_messages()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        var conversation = (await ReplyAsync(await SayAsync(ana, "first message"))).ConversationId;
+
+        await ReplyAsync(await SayAsync(ana, "second message", conversation));
+
+        await using var db = _app.Db();
+        var calls = await db.AssistantSteps.Where(s => s.Kind == StepKind.ModelCall).OrderBy(s => s.Seq).Select(s => s.Payload).ToListAsync(Ct);
+        Assert.Equal(2, calls.Count);
+        Assert.Contains("second message", calls[1]);
+        Assert.DoesNotContain("first message", calls[1]);
+        Assert.DoesNotContain("You help Ana", calls[1]);
+    }
+
     // ---- level 3: a proposal is offered exactly when the same request would book ----
 
     [Fact]
