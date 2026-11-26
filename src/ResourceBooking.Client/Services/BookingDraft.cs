@@ -20,11 +20,14 @@ public sealed class BookingDraft
     public string? Title { get; set; }
     public Guid? DeliveryRoomId { get; set; }
 
+    /// <summary>The assistant's proposal this draft came from, sent so the booking is linked to it.</summary>
+    public Guid? ProposalId { get; set; }
+
     public bool IsCatering => Type == ResourceType.Catering;
 
     public BookingRequest ToRequest() => IsCatering
-        ? new BookingRequest { ResourceId = ResourceId, DeliveryAt = Date.ToDateTime(Start), DeliveryRoomId = DeliveryRoomId, Attendees = Attendees, Title = Blank(Title) }
-        : new BookingRequest { ResourceId = ResourceId, Start = Date.ToDateTime(Start), End = EndDate.ToDateTime(End), Attendees = Attendees, Title = Blank(Title) };
+        ? new BookingRequest { ResourceId = ResourceId, DeliveryAt = Date.ToDateTime(Start), DeliveryRoomId = DeliveryRoomId, Attendees = Attendees, Title = Blank(Title), ProposalId = ProposalId }
+        : new BookingRequest { ResourceId = ResourceId, Start = Date.ToDateTime(Start), End = EndDate.ToDateTime(End), Attendees = Attendees, Title = Blank(Title), ProposalId = ProposalId };
 
     public static BookingDraft From(BookingDto booking) => new()
     {

@@ -92,7 +92,9 @@ public sealed class AssistantService(
         foreach (var p in open)
         {
             var payload = p.Kind == ProposalKind.Cancel ? null : JsonSerializer.Deserialize<BookingRequest>(p.Payload, JsonSerializerOptions.Web);
-            var summary = payload is null ? "Cancel this booking" : await tools.SummaryAsync(payload, CancellationToken.None);
+            var summary = payload is null
+                ? await tools.CancelSummaryAsync(p.BookingId!.Value, CancellationToken.None)
+                : await tools.SummaryAsync(payload, CancellationToken.None);
             proposals.Add(new ProposalDto(p.Id, p.Kind, p.BookingId, payload, summary));
         }
         return new AssistantReply(conversationId, text, proposals);

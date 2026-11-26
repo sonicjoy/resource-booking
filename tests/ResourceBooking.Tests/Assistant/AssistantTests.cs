@@ -116,6 +116,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
 
         Assert.Equal((ProposalKind.Change, severn), (change.Proposals.Single().Kind, change.Proposals.Single().BookingId!.Value));
         Assert.Equal((ProposalKind.Cancel, severn), (cancel.Proposals.Single().Kind, cancel.Proposals.Single().BookingId!.Value));
+        Assert.StartsWith("Cancel Severn, ", cancel.Proposals.Single().Summary);
     }
 
     [Fact]

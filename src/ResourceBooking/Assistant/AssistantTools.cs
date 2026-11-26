@@ -113,7 +113,7 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
         {
             return "Not proposed: no upcoming booking of yours with that id.";
         }
-        var summary = $"Cancel {booking.Resource!.Name}, {Text(CompanyTime.ToLocal(booking.DeliveryAt ?? booking.StartsAt, zone))}";
+        var summary = CancelSummary(booking);
         await StoreAsync(ProposalKind.Cancel, bookingId, "{}", ct);
         return $"Proposed: {summary}. The user confirms it.";
     }
@@ -163,6 +163,15 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
             ? $"{name}: {r.Attendees} portions to {names.GetValueOrDefault(r.DeliveryRoomId ?? Guid.Empty, "?")}, {Text(delivery)}"
             : $"{name}, {Text(r.Start!.Value)} to {r.End!.Value:HH:mm}, {r.Attendees} people";
     }
+
+    /// <summary>A cancellation in words: the booking's resource and when it starts or is delivered.</summary>
+    public async Task<string> CancelSummaryAsync(Guid bookingId, CancellationToken ct) =>
+        await db.Bookings.AsNoTracking().Include(b => b.Resource).SingleOrDefaultAsync(b => b.Id == bookingId, ct) is { } booking
+            ? CancelSummary(booking)
+            : "Cancel a booking";
+
+    private string CancelSummary(Booking booking) =>
+        $"Cancel {booking.Resource!.Name}, {Text(CompanyTime.ToLocal(booking.DeliveryAt ?? booking.StartsAt, zone))}";
 
     private static DateTime? Local(string? text) =>
         DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t) ? t : null;

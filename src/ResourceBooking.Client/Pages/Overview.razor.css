@@ -120,3 +120,26 @@
 }
 
 
+
+.book.with-assistant {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 22rem;
+    gap: 1rem;
+    align-items: start;
+}
+
+.book-main {
+    min-width: 0;
+}
+
+.book-head {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+@media (max-width: 767px) {
+    .book.with-assistant {
+        display: block;
+    }
+}

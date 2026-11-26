@@ -5,7 +5,15 @@
 
 <PageTitle>Book</PageTitle>
 
-<h1>Book</h1>
+<div class="book @(assistantOpen ? "with-assistant" : "")">
+<div class="book-main">
+<div class="book-head">
+    <h1>Book</h1>
+    @if (!assistantOpen)
+    {
+        <FluentButton Appearance="ButtonAppearance.Outline" OnClick="() => assistantOpen = true">Ask assistant</FluentButton>
+    }
+</div>
 
 <div class="day-picker">
     <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => MoveAsync(-1)">Previous day</FluentButton>
@@ -97,6 +105,10 @@ else
     </div>
 }
 
+</div>
+<AssistantPanel Open="assistantOpen" OnClose="() => assistantOpen = false" OnReview="ReviewAsync" Confirmed="confirmed" OnChanged="ChangedAsync" />
+</div>
+
 @if (draft is not null)
 {
     <BookingForm Draft="draft" OnSaved="SavedAsync" OnCancel="() => draft = null" />
@@ -115,6 +127,8 @@ else
     private Saved? saved;
     private string? resourcesError;
     private string? dayError;
+    private bool assistantOpen;
+    private readonly HashSet<Guid> confirmed = [];
 
     private sealed record Saved(BookingDto Booking, string Text);
 
@@ -291,8 +305,55 @@ else
 
     private async Task SavedAsync(BookingDto booking)
     {
+        if (draft?.ProposalId is { } proposal)
+        {
+            confirmed.Add(proposal);
+        }
         draft = null;
         saved = new Saved(booking, Describe(booking));
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Opens the booking form filled in from an assistant proposal, carrying its id so the booking is linked to
+    /// it, and moves the grid to the proposal's day so the result shows after confirming.
+    /// </summary>
+    private async Task ReviewAsync(ProposalDto proposal)
+    {
+        var request = proposal.Request!;
+        if (!resources.TryGetValue(request.ResourceId!.Value, out var resource))
+        {
+            dayError = "That resource can't be booked any more. Ask the assistant again.";
+            return;
+        }
+        var at = request.DeliveryAt ?? request.Start!.Value;
+        saved = null;
+        draft = new BookingDraft
+        {
+            BookingId = proposal.Kind == ProposalKind.Change ? proposal.BookingId : null,
+            ProposalId = proposal.Id,
+            ResourceId = resource.Id,
+            ResourceName = resource.Name,
+            Type = resource.Type,
+            Date = DateOnly.FromDateTime(at),
+            EndDate = DateOnly.FromDateTime(request.End ?? at),
+            Start = TimeOnly.FromDateTime(at),
+            End = request.End is { } end ? TimeOnly.FromDateTime(end) : default,
+            Attendees = request.Attendees,
+            Title = request.Title,
+            DeliveryRoomId = request.DeliveryRoomId,
+        };
+        if (draft.Date != date)
+        {
+            date = draft.Date;
+            day = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task ChangedAsync()
+    {
+        saved = null;
         await LoadAsync();
     }
 

@@ -1,8 +1,13 @@
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Playwright;
 using ResourceBooking.Data;
+using ResourceBooking.Tests.Infrastructure;
 using Testcontainers.PostgreSql;
 
 namespace ResourceBooking.E2E;
@@ -10,6 +15,7 @@ namespace ResourceBooking.E2E;
 /// <summary>
 /// The real app on Kestrel with its own PostgreSQL container and the real clock, plus one Chromium.
 /// Set E2E_BASE_URL to run the same journeys against a deployed app instead; nothing is started then.
+/// The local app's model is <see cref="Model"/>, a scripted stub.
 /// </summary>
 public sealed class AppFixture : IAsyncLifetime
 {
@@ -18,16 +24,23 @@ public sealed class AppFixture : IAsyncLifetime
     private IPlaywright? _playwright;
 
     public string BaseUrl { get; private set; } = "";
+
+    /// <summary>True when the journeys run against a deployed app, whose model can't be scripted.</summary>
+    public bool Remote { get; private set; }
+
+    /// <summary>The local app's model; journeys script it before they talk to the assistant.</summary>
+    public StubChatClient Model { get; } = new();
     public IBrowser Browser { get; private set; } = null!;
 
     public async ValueTask InitializeAsync()
     {
         BaseUrl = Environment.GetEnvironmentVariable("E2E_BASE_URL")?.TrimEnd('/') ?? "";
-        if (BaseUrl == "")
+        Remote = BaseUrl != "";
+        if (!Remote)
         {
             _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
             await _db.StartAsync();
-            _app = new Factory(_db.GetConnectionString());
+            _app = new Factory(_db.GetConnectionString(), Model);
             _app.UseKestrel(0);
             _app.StartServer();
             BaseUrl = _app.ClientOptions.BaseAddress.ToString().TrimEnd('/');
@@ -77,13 +90,18 @@ public sealed class AppFixture : IAsyncLifetime
         return page;
     }
 
-    private sealed class Factory(string connectionString) : WebApplicationFactory<Program>
+    private sealed class Factory(string connectionString, IChatClient model) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("ConnectionStrings:Db", connectionString);
             builder.UseSetting("Demo:ReseedWindowSeconds", "0");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IChatClient>();
+                services.AddSingleton(model);
+            });
         }
     }
 }

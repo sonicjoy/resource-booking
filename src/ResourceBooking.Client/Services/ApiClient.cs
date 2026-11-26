@@ -42,11 +42,14 @@ public sealed class ApiClient(HttpClient http, Auth.MeAuthenticationStateProvide
 
     public Task<ApiResult<BookingDto>> UpdateAsync(Guid id, BookingRequest request) => SendAsync<BookingDto>(HttpMethod.Put, $"api/bookings/{id}", request);
 
-    public Task<ApiResult<bool>> CancelAsync(Guid id) => SendAsync<bool>(HttpMethod.Delete, $"api/bookings/{id}", null);
+    public Task<ApiResult<bool>> CancelAsync(Guid id, Guid? proposalId = null) =>
+        SendAsync<bool>(HttpMethod.Delete, proposalId is { } p ? $"api/bookings/{id}?proposalId={p}" : $"api/bookings/{id}", null);
 
     public Task<ApiResult<List<NoticeDto>>> NoticesAsync() => GetAsync<List<NoticeDto>>("api/notices");
 
     public Task<ApiResult<bool>> MarkReadAsync(Guid id) => SendAsync<bool>(HttpMethod.Post, $"api/notices/{id}/read", null);
+
+    public Task<ApiResult<AssistantReply>> AskAsync(AssistantRequest request) => SendAsync<AssistantReply>(HttpMethod.Post, "api/assistant/messages", request);
 
     // ---- admin ----
 
@@ -85,6 +88,11 @@ public sealed class ApiClient(HttpClient http, Auth.MeAuthenticationStateProvide
         }
         return GetAsync<HistoryPage>("api/history" + (query.Count > 0 ? "?" + string.Join("&", query) : ""));
     }
+
+    public Task<ApiResult<List<TraceSummary>>> TracesAsync(DateOnly from, DateOnly to) =>
+        GetAsync<List<TraceSummary>>(string.Create(CultureInfo.InvariantCulture, $"api/assistant/traces?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"));
+
+    public Task<ApiResult<List<TraceStep>>> TraceAsync(Guid conversationId) => GetAsync<List<TraceStep>>($"api/assistant/traces/{conversationId}");
 
     public Task<ApiResult<bool>> SignOutAsync() => SendAsync<bool>(HttpMethod.Post, "api/auth/sign-out", null);
 
