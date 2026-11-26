@@ -127,6 +127,20 @@ public class UtilisationTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Splitting_a_range_gives_the_same_days()
+    {
+        await using var read = _app.Db();
+        var utilisation = new Utilisation(read, London);
+
+        var (_, whole) = await utilisation.ByDayAsync(new DateOnly(2026, 11, 18), new DateOnly(2026, 11, 24), null, Ct);
+        var (_, early) = await utilisation.ByDayAsync(new DateOnly(2026, 11, 18), new DateOnly(2026, 11, 20), null, Ct);
+        var (_, late) = await utilisation.ByDayAsync(new DateOnly(2026, 11, 21), new DateOnly(2026, 11, 24), null, Ct);
+
+        static IEnumerable<ResourceDay> Sorted(IEnumerable<ResourceDay> days) => days.OrderBy(d => d.ResourceId).ThenBy(d => d.Day);
+        Assert.Equal(Sorted(whole), Sorted(early.Concat(late)));
+    }
+
+    [Fact]
     public async Task The_report_is_the_sum_of_the_days()
     {
         await using var read = _app.Db();

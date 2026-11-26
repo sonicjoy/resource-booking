@@ -21,7 +21,7 @@ public static class AvailabilityEndpoints
         // The month view (design: month-view §3): totals per calendar day for one type, the same for every caller.
         api.MapGet("/availability/month", async (int year, int month, ResourceType type, Reports.Utilisation utilisation, CancellationToken ct) =>
         {
-            if (year is < 2000 or > 2100 || month is < 1 or > 12 || !Enum.IsDefined(type))
+            if (year is < CalendarRange.FirstYear or > CalendarRange.LastYear || month is < 1 or > 12 || !Enum.IsDefined(type))
             {
                 return ApiResults.Problem(ApiError.BadRequest("Give a month from 1 to 12, a year from 2000 to 2100 and a resource type"));
             }

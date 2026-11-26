@@ -14,12 +14,12 @@
 <h1>Month</h1>
 
 <div class="month-picker">
-    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => MoveAsync(-1)">Previous month</FluentButton>
+    <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(first.AddMonths(-1).Year < CalendarRange.FirstYear)" OnClick="() => Move(-1)">Previous month</FluentButton>
     <h2 class="month-name">@first.ToString("MMMM yyyy", CultureInfo.InvariantCulture)</h2>
-    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => MoveAsync(1)">Next month</FluentButton>
+    <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(first.AddMonths(1).Year > CalendarRange.LastYear)" OnClick="() => Move(1)">Next month</FluentButton>
 </div>
 
-<FluentTabs ActiveTabId="@TabOf(type)" ActiveTabIdChanged="TabChangedAsync">
+<FluentTabs ActiveTabId="@TypeTabs.Of(type)" ActiveTabIdChanged="TabChanged">
     <FluentTab Id="rooms" Header="Rooms" />
     <FluentTab Id="cars" Header="Cars" />
     <FluentTab Id="catering" Header="Catering" />
@@ -32,7 +32,10 @@
 
 @if (month is null)
 {
-    <p>Loading…</p>
+    @if (problem is null)
+    {
+        <p>Loading…</p>
+    }
 }
 else
 {
@@ -56,7 +59,7 @@ else
             var (figure, unit) = Text(d);
             var text = figure + unit;
             <a class="day @Band(d) @(d.Date < Clock.Today ? "past" : "") @(d.Date == Clock.Today ? "today" : "")"
-               href="@Link(d.Date)" aria-label="@($"{d.Date.ToString("dddd d MMMM", CultureInfo.InvariantCulture)}, {text}")"
+               href="@TypeTabs.BookLink(d.Date, type)" aria-label="@($"{d.Date.ToString("dddd d MMMM", CultureInfo.InvariantCulture)}, {text}")"
                aria-current="@(d.Date == Clock.Today ? "date" : null)">
                 <span class="number">@d.Date.Day</span>
                 <span class="share">@figure<span class="unit">@unit</span></span>
@@ -71,11 +74,12 @@ else
     [SupplyParameterFromQuery(Name = "type")]
     public string? TypeQuery { get; set; }
 
+    // Strings, not ints: Blazor throws on a query value it can't parse, and a hand-edited link shouldn't break the page.
     [SupplyParameterFromQuery(Name = "year")]
-    public int? YearQuery { get; set; }
+    public string? YearQuery { get; set; }
 
     [SupplyParameterFromQuery(Name = "month")]
-    public int? MonthQuery { get; set; }
+    public string? MonthQuery { get; set; }
 
     private DateOnly first;
     private ResourceType type = ResourceType.MeetingRoom;
@@ -88,9 +92,10 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        var wantedType = Enum.TryParse<ResourceType>(TypeQuery, out var t) && Enum.IsDefined(t) ? t : ResourceType.MeetingRoom;
-        var wantedFirst = YearQuery is >= 2000 and <= 2100 && MonthQuery is >= 1 and <= 12
-            ? new DateOnly(YearQuery.Value, MonthQuery.Value, 1)
+        var wantedType = TypeTabs.Parse(TypeQuery);
+        var wantedFirst = int.TryParse(YearQuery, NumberStyles.None, CultureInfo.InvariantCulture, out var y) && y is >= CalendarRange.FirstYear and <= CalendarRange.LastYear
+            && int.TryParse(MonthQuery, NumberStyles.None, CultureInfo.InvariantCulture, out var m) && m is >= 1 and <= 12
+            ? new DateOnly(y, m, 1)
             : new DateOnly(Clock.Today.Year, Clock.Today.Month, 1);
         if (load > 0 && wantedType == type && wantedFirst == first)
         {
@@ -114,34 +119,21 @@ else
         month = result.Value;
     }
 
-    private Task MoveAsync(int months) => ShowAsync(first.AddMonths(months), type);
+    private void Move(int months) => Show(first.AddMonths(months), type);
 
-    // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
-    private Task TabChangedAsync(string? tab) =>
-        tab is null || tab == TabOf(type) || Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0] != "month"
-            ? Task.CompletedTask
-            : ShowAsync(first, tab switch
-        {
-            "cars" => ResourceType.Car,
-            "catering" => ResourceType.Catering,
-            _ => ResourceType.MeetingRoom,
-        });
-
-    // The type and month live in the address, so Back and reload show the same month; the new parameters load it.
-    private Task ShowAsync(DateOnly wantedFirst, ResourceType wantedType)
+    private void TabChanged(string? tab)
     {
-        Navigation.NavigateTo(string.Create(CultureInfo.InvariantCulture, $"month?type={wantedType}&year={wantedFirst.Year}&month={wantedFirst.Month}"));
-        return Task.CompletedTask;
+        // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
+        if (tab is null || tab == TypeTabs.Of(type) || !TypeTabs.IsOn(Navigation, "month"))
+        {
+            return;
+        }
+        Show(first, TypeTabs.TypeOf(tab));
     }
 
-    private static string TabOf(ResourceType t) => t switch
-    {
-        ResourceType.Car => "cars",
-        ResourceType.Catering => "catering",
-        _ => "rooms",
-    };
-
-    private string Link(DateOnly date) => string.Create(CultureInfo.InvariantCulture, $"./?date={date:yyyy-MM-dd}&type={type}");
+    // The type and month live in the address, so Back and reload show the same month; the new parameters load it.
+    private void Show(DateOnly wantedFirst, ResourceType wantedType) =>
+        Navigation.NavigateTo(string.Create(CultureInfo.InvariantCulture, $"month?type={wantedType}&year={wantedFirst.Year}&month={wantedFirst.Month}"));
 
     // The figure ("45%", "3 of 5") always shows; narrow screens drop the unit, which the link's name keeps.
     private (string Figure, string Unit) Text(DayShare d)
@@ -159,12 +151,12 @@ else
         };
     }
 
-    private static string Band(DayShare d) => d.Share switch
+    // Bands follow the rounded figure shown, so "25%" is never shaded as under 25%.
+    private static string Band(DayShare d) => d.Share is not { } share ? "closed" : Math.Round(share * 100, MidpointRounding.AwayFromZero) switch
     {
-        null => "closed",
-        < 0.25 => "band-0",
-        < 0.5 => "band-1",
-        < 0.75 => "band-2",
+        < 25 => "band-0",
+        < 50 => "band-1",
+        < 75 => "band-2",
         _ => "band-3",
     };
 }

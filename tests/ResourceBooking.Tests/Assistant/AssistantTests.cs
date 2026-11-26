@@ -98,13 +98,16 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         await ReplyAsync(await SayAsync(client, "anything about the car tomorrow?"));
 
         await using var check = _app.Db();
+        var callerId = Guid.Parse(caller);
+        var others = await check.Users.Where(u => u.Id != callerId).Select(u => u.DisplayName).ToListAsync(Ct);
+        var theirTitles = await check.Bookings.Where(b => b.UserId != callerId && b.Title != null).Select(b => b.Title!).ToListAsync(Ct);
         var results = await check.AssistantSteps.Where(s => s.Kind == StepKind.ToolCall).Select(s => s.Payload).ToListAsync(Ct);
         Assert.Equal(5, results.Count);
+        Assert.Contains("Site visit", theirTitles);
         Assert.All(results, payload =>
         {
-            Assert.DoesNotContain("Site visit", payload);
-            Assert.DoesNotContain("\"Ben\"", payload);
-            Assert.DoesNotContain("\\u0022Ben\\u0022", payload);
+            Assert.All(theirTitles, title => Assert.DoesNotContain(title, payload));
+            Assert.All(others, name => Assert.DoesNotMatch($@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b", payload));
         });
     }
 

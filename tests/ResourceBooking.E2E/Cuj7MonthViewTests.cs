@@ -21,6 +21,8 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
 
     private static DateOnly Tomorrow => Pages.LondonToday().AddDays(1);
 
+    private static string Label(DateOnly d, string share) => $"{d.ToString("dddd d MMMM", CultureInfo.InvariantCulture)}, {share}";
+
     private static string Iso(DateOnly d) => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     private async Task BookAsync(Guid user, Guid resource, DateOnly day, int from, int to, string title)
@@ -33,25 +35,27 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
     [Fact]
     public async Task Ana_finds_a_quiet_week_next_month_and_opens_a_busy_day()
     {
+        // The seed's future bookings sit within three days of today, so the 10th onwards of next month is clear.
         var next = Pages.LondonToday().AddMonths(1);
-        var third = new DateOnly(next.Year, next.Month, 3);
-        await BookAsync(Seed.AnaId, Seed.ThamesId, third, 10, 12, "Planning day");
-        await BookAsync(Seed.AnaId, Seed.SevernId, third.AddDays(1), 9, 13, "Workshop");
+        var tenth = new DateOnly(next.Year, next.Month, 10);
+        await BookAsync(Seed.AnaId, Seed.ThamesId, tenth, 10, 12, "Planning day");
+        await BookAsync(Seed.AnaId, Seed.SevernId, tenth.AddDays(1), 9, 13, "Workshop");
 
         var ana = await app.SignInAsync("Ana");
         await ana.GoToAsync("Month");
         await ana.Button("Next month").ClickAsync();
 
         // Thames and Severn are open 08:00-18:00, 20 room hours a day: 2 hours is 10%, 4 hours is 20%.
-        await Expect(ana.DayLink(third)).ToHaveAttributeAsync("aria-label", $"{third:dddd d MMMM}, 10% of room hours booked");
-        await Expect(ana.DayLink(third.AddDays(1))).ToContainTextAsync("20% of room hours booked");
-        for (var d = 8; d <= 14; d++)
+        await Expect(ana.DayLink(tenth)).ToHaveAttributeAsync("aria-label", Label(tenth, "10% of room hours booked"));
+        await Expect(ana.DayLink(tenth.AddDays(1))).ToHaveAttributeAsync("aria-label", Label(tenth.AddDays(1), "20% of room hours booked"));
+        for (var d = 15; d <= 21; d++)
         {
-            await Expect(ana.DayLink(new DateOnly(next.Year, next.Month, d))).ToContainTextAsync("0% of room hours booked");
+            var quiet = new DateOnly(next.Year, next.Month, d);
+            await Expect(ana.DayLink(quiet)).ToHaveAttributeAsync("aria-label", Label(quiet, "0% of room hours booked"));
         }
 
-        await ana.DayLink(third).ClickAsync();
-        await Expect(ana.Locator(".day-label")).ToContainTextAsync(third.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture));
+        await ana.DayLink(tenth).ClickAsync();
+        await Expect(ana.Locator(".day-label")).ToContainTextAsync(tenth.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture));
         await Expect(ana.GetByRole(AriaRole.Tab, new() { Name = "Rooms", Exact = true })).ToHaveAttributeAsync("aria-selected", "true");
         await Expect(ana.Cell("Thames", "10:00")).ToHaveAttributeAsync("aria-label", "Thames, 10:00, your booking: Planning day");
     }
@@ -113,6 +117,17 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
 
         await Expect(ana).ToHaveURLAsync($"{app.BaseUrl}/month");
         await Expect(ana.GetByRole(AriaRole.Tab, new() { Name = "Rooms", Exact = true })).ToHaveAttributeAsync("aria-selected", "true");
+    }
+
+    [Fact]
+    public async Task A_month_link_with_a_bad_year_month_or_type_opens_this_month_on_rooms()
+    {
+        var ana = await app.SignInAsync("Ana");
+        await ana.GotoAsync($"{app.BaseUrl}/month?year=abc&month=99&type=Spaceship");
+
+        await Expect(ana.Locator(".month-name")).ToHaveTextAsync(Pages.LondonToday().ToString("MMMM yyyy", CultureInfo.InvariantCulture));
+        await Expect(ana.GetByRole(AriaRole.Tab, new() { Name = "Rooms", Exact = true })).ToHaveAttributeAsync("aria-selected", "true");
+        await Expect(ana.DayLink(Pages.LondonToday())).ToBeVisibleAsync();
     }
 
     [Fact]

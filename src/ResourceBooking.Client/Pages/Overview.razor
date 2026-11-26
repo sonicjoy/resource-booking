@@ -135,12 +135,7 @@ else
 
     private sealed record Cell(string Kind, string Label, string Text);
 
-    private ResourceType Type => activeTab switch
-    {
-        "cars" => ResourceType.Car,
-        "catering" => ResourceType.Catering,
-        _ => ResourceType.MeetingRoom,
-    };
+    private ResourceType Type => TypeTabs.TypeOf(activeTab);
 
     // A link such as /?date=2026-12-03&type=Car (from Month) opens that day and type; anything unreadable falls back to today and rooms.
     [SupplyParameterFromQuery(Name = "date")]
@@ -153,6 +148,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        date = Clock.Today;
         var list = await Api.ResourcesAsync();
         resourcesError = list.Problem?.Message;
         resources = list.Value?.ToDictionary(r => r.Id) ?? [];
@@ -162,8 +158,8 @@ else
     protected override async Task OnParametersSetAsync()
     {
         var wantedDate = DateOnly.TryParseExact(DateQuery, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.None, out var d) ? d : Clock.Today;
-        var wantedTab = Enum.TryParse<ResourceType>(TypeQuery, out var t) && Enum.IsDefined(t) ? TabOf(t) : "rooms";
+            System.Globalization.DateTimeStyles.None, out var d) && CalendarRange.InRange(d) ? d : Clock.Today;
+        var wantedTab = TypeTabs.Of(TypeTabs.Parse(TypeQuery));
         if (started && wantedDate == date && wantedTab == activeTab)
         {
             return;
@@ -175,18 +171,8 @@ else
         await LoadAsync();
     }
 
-    private static string TabOf(ResourceType t) => t switch
-    {
-        ResourceType.Car => "cars",
-        ResourceType.Catering => "catering",
-        _ => "rooms",
-    };
-
-    private bool OnThisPage => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0] == "";
-
     // Keeps the shown day and type in the address, so reload and Back return to them.
-    private void Remember() =>
-        Navigation.NavigateTo(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"./?date={date:yyyy-MM-dd}&type={Type}"), replace: true);
+    private void Remember() => Navigation.NavigateTo(TypeTabs.BookLink(date, Type), replace: true);
 
     private int load;
 
@@ -228,7 +214,7 @@ else
     private async Task TabChangedAsync(string? tab)
     {
         // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
-        if (tab is null || tab == activeTab || !OnThisPage)
+        if (tab is null || tab == activeTab || !TypeTabs.IsOn(Navigation, ""))
         {
             return;
         }
@@ -375,6 +361,7 @@ else
         {
             date = draft.Date;
             day = null;
+            Remember();
             await LoadAsync();
         }
     }

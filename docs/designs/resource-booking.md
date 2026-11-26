@@ -139,7 +139,7 @@ Tables use snake_case (EFCore.NamingConventions). Enums are stored as text. Ids 
 * **bookings**:
   * `id`, `resource_id`, `user_id`.
   * `unit_no`: 0, except for catering orders.
-  * `title`: optional, and shown only to its owner (see [Visibility](#visibility)).
+  * `title`: optional. On the Book grid only its owner sees it; admins still see it in History and Traces (see [Visibility](#visibility)).
   * `starts_at`, `ends_at`, `blocked_until`.
   * `attendees`: portions, for catering.
   * `delivery_at`, `delivery_room_id`: catering only.
