@@ -68,15 +68,17 @@ public sealed class AssistantService(
         try
         {
             var response = await client.GetResponseAsync(messages, new ChatOptions { Tools = tools.Create(trace) }, timeout.Token);
-            if (string.IsNullOrWhiteSpace(response.Text) && response.FinishReason == ChatFinishReason.Length)
+            // The answer is the last message: earlier rounds of tool calls may carry a preamble.
+            var answer = response.Messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
+            if (string.IsNullOrWhiteSpace(answer) && response.FinishReason is { } finish && finish != ChatFinishReason.Stop)
             {
-                // The model used its whole output cap (a reasoning model's thinking counts) and wrote nothing.
-                log.LogWarning("Assistant reply cut off at the output cap for conversation {ConversationId}", conversationId);
+                // Stopped without an answer: the output cap (a reasoning model's thinking counts), a content filter.
+                log.LogWarning("Assistant reply stopped without an answer ({FinishReason}) for conversation {ConversationId}", finish, conversationId);
                 text = Unavailable;
             }
             else
             {
-                text = string.IsNullOrWhiteSpace(response.Text) ? "Done." : response.Text;
+                text = string.IsNullOrWhiteSpace(answer) ? "Done." : answer;
             }
         }
         catch (BudgetExhaustedException)

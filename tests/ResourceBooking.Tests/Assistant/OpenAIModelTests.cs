@@ -66,6 +66,20 @@ public class OpenAIModelTests
     }
 
     [Fact]
+    public async Task A_callers_own_request_options_survive_the_storage_setting()
+    {
+#pragma warning disable OPENAI001
+        var options = new ChatOptions { RawRepresentationFactory = _ => new OpenAI.Responses.CreateResponseOptions { EndUserId = "visitor-42" } };
+#pragma warning restore OPENAI001
+
+        var (_, body) = await SendOnceAsync(options);
+
+        Assert.Contains("visitor-42", body);
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+        Assert.False(json.RootElement.GetProperty("store").GetBoolean());
+    }
+
+    [Fact]
     public void With_no_model_configured_the_default_is_gpt_6_luna()
     {
         var client = OpenAIModel.Create(Config(("OpenAI:ApiKey", "sk-test-not-a-real-key")));

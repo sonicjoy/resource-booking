@@ -84,6 +84,7 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
         [Description("For a catering order: the meeting room it is delivered to.")] Guid? deliveryRoomId = null,
         CancellationToken ct = default)
     {
+        (start, end, title, deliveryAt) = (Blank(start), Blank(end), Blank(title), Blank(deliveryAt));
         if (Unreadable(start, end, deliveryAt) is { } refusal)
         {
             return refusal;
@@ -109,6 +110,7 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     public async Task<string> ProposeChangeAsync(Guid bookingId, string? start = null, string? end = null, int? attendees = null,
         string? title = null, string? deliveryAt = null, Guid? deliveryRoomId = null, CancellationToken ct = default)
     {
+        (start, end, title, deliveryAt) = (Blank(start), Blank(end), Blank(title), Blank(deliveryAt));
         if (Unreadable(start, end, deliveryAt) is { } refusal)
         {
             return refusal;
@@ -223,6 +225,9 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
 
     private string CancelSummary(Booking booking) =>
         $"Cancel {booking.Resource!.Name}, {Text(CompanyTime.ToLocal(booking.DeliveryAt ?? booking.StartsAt, zone))}";
+
+    /// <summary>A blank argument from the model means "not given", the same as leaving it out.</summary>
+    private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 
     private static readonly string[] Formats = ["yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm"];
 

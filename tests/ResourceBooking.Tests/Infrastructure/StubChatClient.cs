@@ -24,6 +24,9 @@ public sealed class StubChatClient : IChatClient
     /// <summary>How each response reports its token usage: in full, without a total, or not at all.</summary>
     public UsageReport Usage { get; set; }
 
+    /// <summary>Text the model writes alongside its tool calls, before the final reply.</summary>
+    public string? Preamble { get; set; }
+
     /// <summary>The finish reason of each final reply, to test a reply cut off at the output cap.</summary>
     public ChatFinishReason? FinishReason { get; set; }
 
@@ -81,6 +84,10 @@ public sealed class StubChatClient : IChatClient
 
         var contents = script.Calls.Select((c, i) => (AIContent)new FunctionCallContent($"call{Calls.Count}_{i}", c.Name,
             JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(c.Arguments, JsonSerializerOptions.Web)))).ToList();
+        if (Preamble is { } preamble)
+        {
+            contents.Insert(0, new TextContent(preamble));
+        }
         return new ChatResponse(new ChatMessage(ChatRole.Assistant, contents)) { Usage = usage };
     }
 

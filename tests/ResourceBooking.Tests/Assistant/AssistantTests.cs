@@ -469,6 +469,92 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
     }
 
+    [Theory]
+    [InlineData("length")]
+    [InlineData("content_filter")]
+    public async Task A_reply_that_stops_without_an_answer_after_a_tool_preamble_says_the_assistant_could_not_answer(string finish)
+    {
+        _app.Model.On("my bookings", "", Call("get_my_bookings", new { }));
+        _app.Model.Preamble = "Let me look.";
+        _app.Model.FinishReason = new ChatFinishReason(finish);
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "my bookings?"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
+    }
+
+    [Fact]
+    public async Task A_blank_title_on_a_change_keeps_the_bookings_title()
+    {
+        Guid severn;
+        await using (var db = _app.Db())
+        {
+            severn = await db.Bookings.Where(b => b.UserId == Seed.AnaId && b.ResourceId == Seed.SevernId).Select(b => b.Id).SingleAsync(Ct);
+        }
+        _app.Model.On("move", "Moved.", Call("propose_change", new { bookingId = severn, start = "2026-11-28T14:00", end = "2026-11-28T15:00", title = "" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "move my Severn booking to 2pm"));
+
+        Assert.Equal("Quarterly review", Assert.Single(reply.Proposals).Request!.Title);
+    }
+
+    private async Task AddKitchenAsync(string name, DateOnly? lastDay)
+    {
+        await using var db = _app.Db();
+        db.Resources.Add(new Resource
+        {
+            Id = Guid.CreateVersion7(),
+            Name = name,
+            Type = ResourceType.Catering,
+            Capacity = 20,
+            Units = 2,
+            OpensAt = new TimeOnly(8, 0),
+            ClosesAt = new TimeOnly(16, 0),
+            MaxDaysAhead = 90,
+            LastDay = lastDay,
+        });
+        await db.SaveChangesAsync(Ct);
+    }
+
+    private async Task<string> RefusalForCateringAgainstARoomAsync()
+    {
+        _app.Model.On("lunch", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, deliveryAt = $"{Tomorrow}T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        await ReplyAsync(await SayAsync(ana, "lunch for 8 in Thames at 12:30 tomorrow"));
+        await using var db = _app.Db();
+        return (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(-1, false)]
+    public async Task A_kitchen_is_listed_through_its_last_day_and_not_after(int lastDayFromDelivery, bool listed)
+    {
+        await AddKitchenAsync("North Kitchen", new DateOnly(2026, 11, 26).AddDays(lastDayFromDelivery));
+
+        var payload = await RefusalForCateringAgainstARoomAsync();
+
+        Assert.Equal(listed, payload.Contains("North Kitchen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_refusal_lists_at_most_10_kitchens_and_says_how_many_more()
+    {
+        for (var i = 1; i <= 11; i++)
+        {
+            await AddKitchenAsync($"Kitchen {i:00}", null);
+        }
+
+        var payload = await RefusalForCateringAgainstARoomAsync();
+
+        // Main Kitchen plus 11 more: 10 listed by name, 2 left over.
+        Assert.Contains("and 2 more", payload);
+        Assert.Equal(10, System.Text.RegularExpressions.Regex.Matches(payload, "Kitchen[^,(]*\\(").Count);
+    }
+
     [Fact]
     public async Task The_kitchens_listed_in_a_refusal_include_one_retiring_after_the_delivery_day()
     {
