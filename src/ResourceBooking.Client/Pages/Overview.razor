@@ -130,6 +130,7 @@ else
     {
         date = Clock.Today;
         var list = await Api.ResourcesAsync();
+        error = list.Problem?.Message;
         resources = list.Value?.ToDictionary(r => r.Id) ?? [];
         kitchens = resources.Values.Where(r => r.Type == ResourceType.Catering).OrderBy(r => r.Name).ToList();
         await LoadAsync();
@@ -146,7 +147,7 @@ else
         {
             return;
         }
-        error = result.Problem?.Message;
+        error = result.Problem?.Message ?? error;
         day = result.Value;
         slots = day is null ? [] : SlotsFor(day.Resources);
     }
@@ -155,6 +156,7 @@ else
     {
         date = date.AddDays(days);
         saved = null;
+        day = null;
         await LoadAsync();
     }
 
@@ -164,6 +166,7 @@ else
         {
             date = picked;
             saved = null;
+            day = null;
             await LoadAsync();
         }
     }
@@ -211,8 +214,9 @@ else
                 ? new("mine", $"{at}, your booking: {busy.Title ?? "untitled"}", busy.Title ?? "Yours")
                 : new("booked", $"{at}, booked", "Booked");
         }
+        // A car needs its gap after each booking, and a booking starting here needs its own gap before the next one.
         var gap = resources.TryGetValue(resource.Id, out var info) ? info.Turnaround ?? TimeSpan.Zero : TimeSpan.Zero;
-        if (gap > TimeSpan.Zero && resource.Busy.Any(b => b.End <= start && start < b.End + gap))
+        if (gap > TimeSpan.Zero && resource.Busy.Any(b => (b.End <= start && start < b.End + gap) || (b.Start >= end && b.Start < end + gap)))
         {
             return new("gap", $"{at}, turnaround gap", "Gap");
         }
@@ -238,18 +242,19 @@ else
         };
     }
 
-    /// <summary>An hour from the cell, or less where the next booking, turnaround gap or closing time comes first.</summary>
+    /// <summary>
+    /// An hour from the cell, or half an hour where the next cell is taken (a booking, a turnaround gap or
+    /// closing), or the closing time if that comes first. A cell in the last half hour of the day ends at midnight.
+    /// </summary>
     private TimeOnly DefaultEnd(ResourceAvailability resource, TimeOnly slot)
     {
-        var end = slot.AddHours(1) < slot ? TimeOnly.MaxValue : slot.AddHours(1);
-        for (var t = slot.Add(Slot); t < end; t = t.Add(Slot))
+        var next = slot.Add(Slot);
+        if (next < slot)
         {
-            if (CellFor(resource, t).Kind != "free")
-            {
-                return t;
-            }
+            return TimeOnly.MaxValue;
         }
-        return resource.ClosesAt is { } closes && closes < end ? closes : end;
+        var end = next.Add(Slot) < next || CellFor(resource, next).Kind != "free" ? next : next.Add(Slot);
+        return resource.ClosesAt is { } closes && closes > slot && closes < end ? closes : end;
     }
 
     private void Order(ResourceAvailability kitchen)
@@ -261,6 +266,7 @@ else
             ResourceName = kitchen.Name,
             Type = ResourceType.Catering,
             Date = date,
+            EndDate = date,
             Start = kitchen.OpensAt is { } opens && opens > new TimeOnly(12, 0) ? opens : new TimeOnly(12, 0),
         };
     }
@@ -275,6 +281,7 @@ else
             ResourceName = kitchen.Name,
             Type = ResourceType.Catering,
             Date = DateOnly.FromDateTime(room.Start),
+            EndDate = DateOnly.FromDateTime(room.Start),
             Start = TimeOnly.FromDateTime(room.Start),
             Attendees = room.Attendees,
             DeliveryRoomId = room.ResourceId,

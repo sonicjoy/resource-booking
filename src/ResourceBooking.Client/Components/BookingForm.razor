@@ -154,13 +154,14 @@
         alternatives = result.Value!.Where(r => r.Id != Draft.ResourceId).ToList();
     }
 
-    /// <summary>Moving the start day moves a one-day booking's end with it, and keeps a longer one's length.</summary>
+    /// <summary>Moving the start day keeps a car booking's length in days; anything else ends on its start day.</summary>
     private void DateChanged(ChangeEventArgs e)
     {
         if (DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var day))
         {
-            Draft.EndDate = Draft.EndDate.AddDays(day.DayNumber - Draft.Date.DayNumber);
+            var days = Draft.Type == ResourceType.Car ? Math.Max(0, Draft.EndDate.DayNumber - Draft.Date.DayNumber) : 0;
             Draft.Date = day;
+            Draft.EndDate = day.AddDays(days);
         }
     }
 

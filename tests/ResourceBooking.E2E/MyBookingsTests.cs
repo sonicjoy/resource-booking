@@ -20,7 +20,7 @@ public class MyBookingsTests(AppFixture app) : IAsyncLifetime
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private static string Day(int fromToday) => DateTime.UtcNow.AddDays(fromToday).ToString("yyyy-MM-dd");
+    private static string Day(int fromToday) => Pages.LondonToday().AddDays(fromToday).ToString("yyyy-MM-dd");
 
     [Fact]
     public async Task Saving_a_multi_day_car_booking_unchanged_keeps_its_end_day()

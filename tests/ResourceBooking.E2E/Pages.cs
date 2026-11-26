@@ -51,5 +51,10 @@ public static class Pages
         throw new InvalidOperationException($"No fillable field labelled {label}");
     }
 
+    private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+
+    /// <summary>Today in the company's zone, which the app's labels and "Next day" count from.</summary>
+    public static DateOnly LondonToday() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, London).DateTime);
+
     public static async Task ConfirmAsync(this IPage page) => await page.Form().Button("Confirm").ClickAsync();
 }

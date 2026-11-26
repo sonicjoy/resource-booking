@@ -105,8 +105,9 @@ public sealed class ApiClient(HttpClient http)
             var summary = reasons.Count > 0 ? string.Join(" ", reasons) : message ?? (fields.Count > 0 ? "Check the fields marked below." : fallback);
             return new ApiProblem(status, code, summary, reasons, fields);
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException or HttpRequestException or TaskCanceledException)
         {
+            // A body that isn't the Problem Details we expect, or that couldn't be read: say what the status means.
             return new ApiProblem(status, null, fallback, [], new Dictionary<string, string[]>());
         }
     }
