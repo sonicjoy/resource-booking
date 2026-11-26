@@ -15,7 +15,7 @@ public sealed record BookingDto(
     Guid? DeliveryRoomId,
     BookingStatus Status);
 
-/// <summary>A busy stretch on the overview. Owner and title are shown only to admins and to the booking's owner.</summary>
+/// <summary>A busy stretch on the Book grid. The title goes only to its owner; the owner's name only to admins, for others' bookings.</summary>
 public sealed record BusyBlock(DateTime Start, DateTime End, bool Mine, string? Title, string? Owner);
 
 public sealed record ResourceAvailability(
