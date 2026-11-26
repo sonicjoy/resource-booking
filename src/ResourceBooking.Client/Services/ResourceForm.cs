@@ -19,21 +19,27 @@ public sealed class ResourceForm
     public int? GapMinutes { get; set; }
     public int? MaxFuturePerUser { get; set; }
 
-    public ResourceRequest ToRequest() => new()
+    /// <summary>The request, with only the fields this type uses: a value typed before switching type isn't sent.</summary>
+    public ResourceRequest ToRequest()
     {
-        Type = Type,
-        Name = Name,
-        Capacity = Capacity,
-        Units = Units,
-        OpensAt = OpensAt,
-        ClosesAt = ClosesAt,
-        MinDuration = MinMinutes is { } min ? TimeSpan.FromMinutes(min) : null,
-        MaxDuration = MaxHours is { } max ? TimeSpan.FromHours(max) : null,
-        MinNotice = NoticeHours is { } notice ? TimeSpan.FromHours(notice) : null,
-        MaxDaysAhead = MaxDaysAhead,
-        Turnaround = GapMinutes is { } gap ? TimeSpan.FromMinutes(gap) : null,
-        MaxFuturePerUser = MaxFuturePerUser,
-    };
+        var uses = RuleFields.For(Type);
+        T? If<T>(RuleField field, T? value) where T : struct => uses.Contains(field) ? value : null;
+        return new()
+        {
+            Type = Type,
+            Name = Name,
+            Capacity = Capacity,
+            Units = uses.Contains(RuleField.Units) ? Units : 1,
+            OpensAt = If(RuleField.OpeningHours, OpensAt),
+            ClosesAt = If(RuleField.OpeningHours, ClosesAt),
+            MinDuration = If(RuleField.MinDuration, MinMinutes is { } min ? TimeSpan.FromMinutes(min) : (TimeSpan?)null),
+            MaxDuration = If(RuleField.MaxDuration, MaxHours is { } max ? TimeSpan.FromHours(max) : (TimeSpan?)null),
+            MinNotice = If(RuleField.MinNotice, NoticeHours is { } notice ? TimeSpan.FromHours(notice) : (TimeSpan?)null),
+            MaxDaysAhead = If(RuleField.MaxDaysAhead, MaxDaysAhead),
+            Turnaround = If(RuleField.Turnaround, GapMinutes is { } gap ? TimeSpan.FromMinutes(gap) : (TimeSpan?)null),
+            MaxFuturePerUser = If(RuleField.MaxFuturePerUser, MaxFuturePerUser),
+        };
+    }
 
     public static ResourceForm From(ResourceDto r) => new()
     {

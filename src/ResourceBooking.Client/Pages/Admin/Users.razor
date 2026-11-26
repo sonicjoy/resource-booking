@@ -14,9 +14,9 @@
 {
     <div role="status"><FluentMessageBar Intent="MessageBarIntent.Success" AllowDismiss="false">@message</FluentMessageBar></div>
 }
-@if (error is not null)
+@if ((error ?? listError) is { } shown)
 {
-    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@shown</FluentMessageBar></div>
 }
 
 @if (users is null)
@@ -103,13 +103,14 @@ else
     private ApiProblem? formProblem;
     private string? message;
     private string? error;
+    private string? listError;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
         var result = await Api.UsersAsync();
-        error = result.Problem?.Message;
+        listError = result.Problem?.Message;
         users = result.Value ?? users ?? [];
     }
 
@@ -117,6 +118,7 @@ else
     {
         editingId = null;
         formProblem = null;
+        error = null;
         editing = new UserRequest { Role = Role.Employee };
     }
 

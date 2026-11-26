@@ -74,7 +74,7 @@
     {
         var result = await Api.HistoryAsync(entityType == "" ? null : entityType, from, to);
         error = result.Problem?.Message;
-        history = result.Value ?? history;
+        history = result.Value;
     }
 
     private async Task EntityChanged(ChangeEventArgs e)

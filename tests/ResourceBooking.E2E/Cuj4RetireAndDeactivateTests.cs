@@ -45,6 +45,7 @@ public class Cuj4RetireAndDeactivateTests(AppFixture app) : IAsyncLifetime
         await sam.GoToAsync("History");
         await sam.Locator(".filters").FillInAsync("Entity", "Bookings");
         await Expect(sam.Row("cancelled").Filter(new() { HasText = "Sam" })).ToHaveCountAsync(3);
+        await Expect(sam.Row("User:")).ToHaveCountAsync(0);
         await sam.GoToAsync("Utilisation");
         await Expect(sam.Row("Severn")).ToBeVisibleAsync();
     }

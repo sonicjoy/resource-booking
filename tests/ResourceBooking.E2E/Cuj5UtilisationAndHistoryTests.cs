@@ -16,10 +16,8 @@ public class Cuj5UtilisationAndHistoryTests(AppFixture app) : IAsyncLifetime
     {
         var sam = await app.SignInAsync("Sam");
         await sam.GoToAsync("Utilisation");
-        var filters = sam.Locator(".filters");
-        await filters.FillInAsync("From", Pages.LondonToday().AddDays(-7).ToString("yyyy-MM-dd"));
-        await filters.FillInAsync("To", Pages.LondonToday().AddDays(-1).ToString("yyyy-MM-dd"));
-        await filters.Button("Show").ClickAsync();
+        // The page opens on the seven days ending yesterday: last week.
+        await Expect(sam.Locator(".filters").GetByLabel("From")).ToHaveValueAsync(Pages.LondonToday().AddDays(-7).ToString("yyyy-MM-dd"));
 
         // Seeded last week: Thames 6 of 70 open hours; Pool Car 1 33 of 84; Main Kitchen 1 of 35 unit-days.
         await Expect(sam.Row("Thames")).ToContainTextAsync("8.6%");

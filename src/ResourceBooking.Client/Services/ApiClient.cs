@@ -23,7 +23,7 @@ public sealed record ApiResult<T>(T? Value, ApiProblem? Problem)
 }
 
 /// <summary>The app's API as typed calls. Times go out as company-local wall-clock times with no offset.</summary>
-public sealed class ApiClient(HttpClient http, Microsoft.AspNetCore.Components.NavigationManager navigation, Auth.MeAuthenticationStateProvider authState)
+public sealed class ApiClient(HttpClient http, Auth.MeAuthenticationStateProvider authState)
 {
     private static string Local(DateTime t) => t.ToString("yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture);
 
@@ -98,9 +98,9 @@ public sealed class ApiClient(HttpClient http, Microsoft.AspNetCore.Components.N
             using var response = await http.SendAsync(request);
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !url.StartsWith("api/auth", StringComparison.Ordinal))
             {
-                // The session ended (signed out elsewhere, deactivated, demoted): go back to sign-in.
+                // The session ended (signed out elsewhere, deactivated, demoted): re-reading who is signed in
+                // shows the page as signed out, and the router sends the browser to sign-in.
                 authState.Refresh();
-                navigation.NavigateTo("sign-in");
             }
             if (!response.IsSuccessStatusCode)
             {

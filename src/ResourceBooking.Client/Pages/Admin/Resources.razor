@@ -45,7 +45,7 @@ else
                     <td>@r.Name</td>
                     <td>@TypeName(r.Type)</td>
                     <td>@(r.Type == ResourceType.Catering ? $"{r.Units} orders a day, {r.Capacity} portions each" : $"{r.Capacity} seats")</td>
-                    <td>@(r.OpensAt is { } o && r.ClosesAt is { } c ? $"{o:HH:mm}-{c:HH:mm}" : "All day")</td>
+                    <td>@Hours(r)</td>
                     <td>@RuleSummary(r)</td>
                     <td>@(r.LastDay is { } last ? (last < Clock.Today ? $"Retired {last:d MMM yyyy}" : $"Last day {last:d MMM yyyy}") : "Active")</td>
                     <td class="row-actions">
@@ -80,9 +80,11 @@ else
             <label class="field"><span>Name</span><input @bind="form.Name" required /></label>
             <FieldError Problem="formProblem" Field="Name" />
             <label class="field"><span>@(form.Type == ResourceType.Catering ? "Portions per order" : "Seats")</span><input type="number" min="1" @bind="form.Capacity" /></label>
+            <FieldError Problem="formProblem" Field="Capacity" />
             @if (Uses(RuleField.Units))
             {
                 <label class="field"><span>Orders a day</span><input type="number" min="1" @bind="form.Units" /></label>
+                <FieldError Problem="formProblem" Field="Units" />
             }
             <label class="field"><span>Opens at</span><input type="time" @bind="form.OpensAt" /></label>
             <label class="field"><span>Closes at</span><input type="time" @bind="form.ClosesAt" /></label>
@@ -91,26 +93,32 @@ else
             @if (Uses(RuleField.MinDuration))
             {
                 <label class="field"><span>Shortest booking (minutes)</span><input type="number" min="1" @bind="form.MinMinutes" /></label>
+                <FieldError Problem="formProblem" Field="MinDuration" />
             }
             @if (Uses(RuleField.MaxDuration))
             {
-                <label class="field"><span>Longest booking (hours)</span><input type="number" min="1" @bind="form.MaxHours" /></label>
+                <label class="field"><span>Longest booking (hours)</span><input type="number" min="0.25" step="any" @bind="form.MaxHours" /></label>
+                <FieldError Problem="formProblem" Field="MaxDuration" />
             }
             @if (Uses(RuleField.MinNotice))
             {
-                <label class="field"><span>Notice needed (hours)</span><input type="number" min="1" @bind="form.NoticeHours" /></label>
+                <label class="field"><span>Notice needed (hours)</span><input type="number" min="0.25" step="any" @bind="form.NoticeHours" /></label>
+                <FieldError Problem="formProblem" Field="MinNotice" />
             }
             @if (Uses(RuleField.MaxDaysAhead))
             {
                 <label class="field"><span>Book up to (days ahead)</span><input type="number" min="1" max="365" @bind="form.MaxDaysAhead" /></label>
+                <FieldError Problem="formProblem" Field="MaxDaysAhead" />
             }
             @if (Uses(RuleField.Turnaround))
             {
                 <label class="field"><span>Gap between bookings (minutes)</span><input type="number" min="1" @bind="form.GapMinutes" /></label>
+                <FieldError Problem="formProblem" Field="Turnaround" />
             }
             @if (Uses(RuleField.MaxFuturePerUser))
             {
                 <label class="field"><span>Future bookings per person</span><input type="number" min="1" max="100" @bind="form.MaxFuturePerUser" /></label>
+                <FieldError Problem="formProblem" Field="MaxFuturePerUser" />
             }
             <div class="actions">
                 <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary">Save</FluentButton>
@@ -207,6 +215,14 @@ else
             await LoadAsync();
         }
     }
+
+    private static string Hours(ResourceDto r) => (r.OpensAt, r.ClosesAt) switch
+    {
+        ({ } o, { } c) => $"{o:HH:mm}-{c:HH:mm}",
+        ({ } o, null) => $"From {o:HH:mm}",
+        (null, { } c) => $"Until {c:HH:mm}",
+        _ => "All day",
+    };
 
     private static string TypeName(ResourceType t) => t switch
     {

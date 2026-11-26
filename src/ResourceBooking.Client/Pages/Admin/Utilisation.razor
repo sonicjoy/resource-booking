@@ -69,7 +69,7 @@
     {
         var result = await Api.UtilisationAsync(from, to);
         error = result.Problem?.Message;
-        rows = result.Value ?? rows;
+        rows = result.Value;
     }
 
     private static string Used(UtilisationRow r) => r.Type == ResourceType.Catering
