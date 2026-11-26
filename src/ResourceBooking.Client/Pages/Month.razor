@@ -110,6 +110,7 @@ else
     {
         var mine = ++load;
         month = null;
+        problem = null;
         var result = await Api.MonthAsync(first.Year, first.Month, type);
         if (mine != load)
         {

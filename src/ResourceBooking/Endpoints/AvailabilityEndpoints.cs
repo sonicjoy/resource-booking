@@ -23,7 +23,7 @@ public static class AvailabilityEndpoints
         {
             if (year is < CalendarRange.FirstYear or > CalendarRange.LastYear || month is < 1 or > 12 || !Enum.IsDefined(type))
             {
-                return ApiResults.Problem(ApiError.BadRequest("Give a month from 1 to 12, a year from 2000 to 2100 and a resource type"));
+                return ApiResults.Problem(ApiError.BadRequest($"Give a month from 1 to 12, a year from {CalendarRange.FirstYear} to {CalendarRange.LastYear} and a resource type"));
             }
             var first = new DateOnly(year, month, 1);
             var last = first.AddMonths(1).AddDays(-1);

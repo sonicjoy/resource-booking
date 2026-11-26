@@ -158,7 +158,7 @@ else
     protected override async Task OnParametersSetAsync()
     {
         var wantedDate = DateOnly.TryParseExact(DateQuery, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.None, out var d) && CalendarRange.InRange(d) ? d : Clock.Today;
+            System.Globalization.DateTimeStyles.None, out var d) ? d : Clock.Today;
         var wantedTab = TypeTabs.Of(TypeTabs.Parse(TypeQuery));
         if (started && wantedDate == date && wantedTab == activeTab)
         {
