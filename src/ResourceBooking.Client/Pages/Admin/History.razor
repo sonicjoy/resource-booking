@@ -1,0 +1,103 @@
+@page "/admin/history"
+@attribute [Authorize(Roles = "Admin")]
+@inject ApiClient Api
+
+<PageTitle>History</PageTitle>
+
+<h1>History</h1>
+<p class="hint">Who added, changed, retired, booked or cancelled what, newest first. London time.</p>
+
+<div class="filters">
+    <div class="field">
+        <label for="history-entity">Entity</label>
+        <select id="history-entity" value="@entityType" @onchange="EntityChanged">
+            <option value="">All</option>
+            <option value="User">Users</option>
+            <option value="Resource">Resources</option>
+            <option value="Booking">Bookings</option>
+        </select>
+    </div>
+    <label class="field"><span>From</span><input type="date" value="@Text(from)" @onchange="e => DateChanged(e, true)" /></label>
+    <label class="field"><span>To</span><input type="date" value="@Text(to)" @onchange="e => DateChanged(e, false)" /></label>
+</div>
+
+@if (error is not null)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
+}
+
+@if (history is not null)
+{
+    @if (history.More)
+    {
+        <p class="hint">Showing the newest @history.Items.Count; narrow the filters to see older events.</p>
+    }
+    <table class="bookings">
+        <thead>
+            <tr>
+                <th scope="col">When</th>
+                <th scope="col">Who</th>
+                <th scope="col">What</th>
+                <th scope="col">Item</th>
+                <th scope="col">Changes</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var h in history.Items)
+            {
+                <tr>
+                    <td>@h.At.ToString("d MMM yyyy HH:mm")</td>
+                    <td>@h.Actor</td>
+                    <td>@h.Verb</td>
+                    <td>@h.EntityType: @h.Entity</td>
+                    <td class="changes">@string.Join("; ", h.Changes.Where(c => c.Old is not null || c.New is not null).Select(Describe))</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (history.Items.Count == 0)
+    {
+        <p>Nothing matches.</p>
+    }
+}
+
+@code {
+    private string entityType = "";
+    private DateOnly? from;
+    private DateOnly? to;
+    private HistoryPage? history;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await Api.HistoryAsync(entityType == "" ? null : entityType, from, to);
+        error = result.Problem?.Message;
+        history = result.Value ?? history;
+    }
+
+    private async Task EntityChanged(ChangeEventArgs e)
+    {
+        entityType = e.Value?.ToString() ?? "";
+        await LoadAsync();
+    }
+
+    private async Task DateChanged(ChangeEventArgs e, bool isFrom)
+    {
+        DateOnly? day = DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+        if (isFrom)
+        {
+            from = day;
+        }
+        else
+        {
+            to = day;
+        }
+        await LoadAsync();
+    }
+
+    private static string Text(DateOnly? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    private static string Describe(FieldChange c) => c.Old is null ? $"{c.Field}: {c.New}" : $"{c.Field}: {c.Old} → {c.New ?? "none"}";
+}

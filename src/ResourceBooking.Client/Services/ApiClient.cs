@@ -23,7 +23,7 @@ public sealed record ApiResult<T>(T? Value, ApiProblem? Problem)
 }
 
 /// <summary>The app's API as typed calls. Times go out as company-local wall-clock times with no offset.</summary>
-public sealed class ApiClient(HttpClient http)
+public sealed class ApiClient(HttpClient http, Microsoft.AspNetCore.Components.NavigationManager navigation, Auth.MeAuthenticationStateProvider authState)
 {
     private static string Local(DateTime t) => t.ToString("yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture);
 
@@ -48,6 +48,44 @@ public sealed class ApiClient(HttpClient http)
 
     public Task<ApiResult<bool>> MarkReadAsync(Guid id) => SendAsync<bool>(HttpMethod.Post, $"api/notices/{id}/read", null);
 
+    // ---- admin ----
+
+    public Task<ApiResult<List<UserDto>>> UsersAsync() => GetAsync<List<UserDto>>("api/users");
+
+    public Task<ApiResult<UserDto>> AddUserAsync(UserRequest request) => SendAsync<UserDto>(HttpMethod.Post, "api/users", request);
+
+    public Task<ApiResult<UserDto>> UpdateUserAsync(Guid id, UserRequest request) => SendAsync<UserDto>(HttpMethod.Put, $"api/users/{id}", request);
+
+    public Task<ApiResult<CascadeResult>> DeactivateAsync(Guid id) => SendAsync<CascadeResult>(HttpMethod.Post, $"api/users/{id}/deactivation", null);
+
+    public Task<ApiResult<ResourceDto>> AddResourceAsync(ResourceRequest request) => SendAsync<ResourceDto>(HttpMethod.Post, "api/resources", request);
+
+    public Task<ApiResult<ResourceDto>> UpdateResourceAsync(Guid id, ResourceRequest request) => SendAsync<ResourceDto>(HttpMethod.Put, $"api/resources/{id}", request);
+
+    public Task<ApiResult<CascadeResult>> RetireAsync(Guid id, DateOnly lastDay) =>
+        SendAsync<CascadeResult>(HttpMethod.Post, $"api/resources/{id}/retirement", new RetirementRequest { LastDay = lastDay });
+
+    public Task<ApiResult<List<UtilisationRow>>> UtilisationAsync(DateOnly from, DateOnly to) =>
+        GetAsync<List<UtilisationRow>>(string.Create(CultureInfo.InvariantCulture, $"api/reports/utilisation?from={from:yyyy-MM-dd}&to={to:yyyy-MM-dd}"));
+
+    public Task<ApiResult<HistoryPage>> HistoryAsync(string? entityType, DateOnly? from, DateOnly? to)
+    {
+        var query = new List<string>();
+        if (entityType is not null)
+        {
+            query.Add($"entityType={entityType}");
+        }
+        if (from is { } f)
+        {
+            query.Add(string.Create(CultureInfo.InvariantCulture, $"from={f:yyyy-MM-dd}"));
+        }
+        if (to is { } t)
+        {
+            query.Add(string.Create(CultureInfo.InvariantCulture, $"to={t:yyyy-MM-dd}"));
+        }
+        return GetAsync<HistoryPage>("api/history" + (query.Count > 0 ? "?" + string.Join("&", query) : ""));
+    }
+
     public Task<ApiResult<bool>> SignOutAsync() => SendAsync<bool>(HttpMethod.Post, "api/auth/sign-out", null);
 
     private Task<ApiResult<T>> GetAsync<T>(string url) => SendAsync<T>(HttpMethod.Get, url, null);
@@ -58,6 +96,12 @@ public sealed class ApiClient(HttpClient http)
         {
             using var request = new HttpRequestMessage(method, url) { Content = body is null ? null : JsonContent.Create(body) };
             using var response = await http.SendAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !url.StartsWith("api/auth", StringComparison.Ordinal))
+            {
+                // The session ended (signed out elsewhere, deactivated, demoted): go back to sign-in.
+                authState.Refresh();
+                navigation.NavigateTo("sign-in");
+            }
             if (!response.IsSuccessStatusCode)
             {
                 return new(default, await ProblemAsync(response));
