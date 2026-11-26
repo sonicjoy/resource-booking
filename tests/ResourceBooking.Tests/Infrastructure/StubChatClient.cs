@@ -24,6 +24,12 @@ public sealed class StubChatClient : IChatClient
     /// <summary>How each response reports its token usage: in full, without a total, or not at all.</summary>
     public UsageReport Usage { get; set; }
 
+    /// <summary>The final reply is split here into separate messages, as the Responses API can return it.</summary>
+    public const string SplitReply = "|";
+
+    /// <summary>Answers with a refusal instead of the scripted reply.</summary>
+    public string? Refusal { get; set; }
+
     /// <summary>Text the model writes alongside its tool calls, before the final reply.</summary>
     public string? Preamble { get; set; }
 
@@ -79,7 +85,10 @@ public sealed class StubChatClient : IChatClient
         var sinceUser = list.SkipWhile(m => m != list.Last(x => x.Role == ChatRole.User)).Skip(1);
         if (script.Calls.Count == 0 || (!NeverReply && sinceUser.Any(m => m.Contents.OfType<FunctionResultContent>().Any())))
         {
-            return new ChatResponse(new ChatMessage(ChatRole.Assistant, script.Reply)) { Usage = usage, FinishReason = FinishReason };
+            List<ChatMessage> final = Refusal is { } refusal
+                ? [new ChatMessage(ChatRole.Assistant, [new ErrorContent(refusal)])]
+                : [.. script.Reply.Split(SplitReply).Select(part => new ChatMessage(ChatRole.Assistant, part))];
+            return new ChatResponse(final) { Usage = usage, FinishReason = FinishReason };
         }
 
         var contents = script.Calls.Select((c, i) => (AIContent)new FunctionCallContent($"call{Calls.Count}_{i}", c.Name,

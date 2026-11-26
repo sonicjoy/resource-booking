@@ -485,6 +485,41 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_final_answer_in_two_messages_is_shown_whole_without_the_tool_rounds_preamble()
+    {
+        _app.Model.On("my bookings", "Part one.|Part two.", Call("get_my_bookings", new { }));
+        _app.Model.Preamble = "Let me look.";
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "my bookings?"));
+
+        Assert.Equal("Part one.\nPart two.", reply.Text);
+    }
+
+    [Fact]
+    public async Task A_model_refusal_says_the_assistant_could_not_answer()
+    {
+        _app.Model.Refusal = "I can't help with that.";
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
+    }
+
+    [Fact]
+    public async Task A_blank_answer_that_finished_normally_says_done()
+    {
+        // The Responses API reports no finish reason for a completed reply.
+        _app.Model.On("hello", "");
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal("Done.", reply.Text);
+    }
+
+    [Fact]
     public async Task A_blank_title_on_a_change_keeps_the_bookings_title()
     {
         Guid severn;

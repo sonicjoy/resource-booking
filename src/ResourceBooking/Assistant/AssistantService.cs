@@ -68,12 +68,18 @@ public sealed class AssistantService(
         try
         {
             var response = await client.GetResponseAsync(messages, new ChatOptions { Tools = tools.Create(trace) }, timeout.Token);
-            // The answer is the last message: earlier rounds of tool calls may carry a preamble.
-            var answer = response.Messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
-            if (string.IsNullOrWhiteSpace(answer) && response.FinishReason is { } finish && finish != ChatFinishReason.Stop)
+            // The answer is the final call's output: the assistant messages after the last tool result. Earlier
+            // rounds of tool calls may carry a preamble; the final call may answer in more than one message.
+            var final = response.Messages.SkipWhile((_, i) => response.Messages.Skip(i).Any(m => m.Role == ChatRole.Tool))
+                .Where(m => m.Role == ChatRole.Assistant).ToList();
+            var answer = string.Join("\n", final.Select(m => m.Text).Where(t => !string.IsNullOrWhiteSpace(t)));
+            var refused = final.SelectMany(m => m.Contents).OfType<ErrorContent>().FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(answer) && (refused is not null || (response.FinishReason is { } finish && finish != ChatFinishReason.Stop)))
             {
-                // Stopped without an answer: the output cap (a reasoning model's thinking counts), a content filter.
-                log.LogWarning("Assistant reply stopped without an answer ({FinishReason}) for conversation {ConversationId}", finish, conversationId);
+                // No answer: the model refused, or stopped at the output cap (a reasoning model's thinking counts)
+                // or a content filter.
+                log.LogWarning("Assistant gave no answer ({FinishReason}, {Refusal}) for conversation {ConversationId}",
+                    response.FinishReason, refused?.Message, conversationId);
                 text = Unavailable;
             }
             else
