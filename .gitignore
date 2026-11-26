@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # The template ignores *.e2e (Visual Studio end-to-end test files), which also matches this project folder.
 !tests/ResourceBooking.E2E/
+
+# Mutation test runs
+StrykerOutput/
