@@ -169,6 +169,18 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Six_concurrent_orders_for_a_five_unit_kitchen_each_get_a_unit_or_kitchen_full()
+    {
+        var clients = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => _app.SignedInAsync(Seed.AnaId)));
+
+        var statuses = await Task.WhenAll(clients.Select(async c =>
+            (await c.PostAsJsonAsync("/api/bookings", Lunch("12:30"), Ct)).StatusCode));
+
+        Assert.Equal(5, statuses.Count(s => s == HttpStatusCode.Created));
+        Assert.Equal(1, statuses.Count(s => s == HttpStatusCode.UnprocessableEntity));
+    }
+
+    [Fact]
     public async Task A_unit_number_sent_by_the_client_is_ignored()
     {
         var ana = await _app.SignedInAsync(Seed.AnaId);
