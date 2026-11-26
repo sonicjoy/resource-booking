@@ -110,3 +110,55 @@ table.bookings td {
 table.bookings .row-actions {
     white-space: nowrap;
 }
+
+.toolbar,
+.filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin: 0.5rem 0 1rem;
+}
+
+.field span,
+.field label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+}
+
+.field input,
+.field select {
+    font: inherit;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--colorNeutralStroke1, #d1d1d1);
+    border-radius: 4px;
+    min-width: 10rem;
+}
+
+td.ratio {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.bar {
+    display: inline-block;
+    width: 10rem;
+    height: 0.6rem;
+    background: var(--colorNeutralBackground3, #f0f0f0);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.bar > span {
+    display: block;
+    height: 100%;
+    background: var(--colorBrandBackground, #0f6cbd);
+}
+
+td.changes {
+    font-size: 0.8125rem;
+    color: var(--colorNeutralForeground2, #424242);
+}

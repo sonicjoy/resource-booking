@@ -29,15 +29,32 @@ public static class Pages
     /// Fills a field in the booking form by its label. A Fluent input is a web component with the real
     /// input in its shadow root, so the matched custom element is filled through that input.
     /// </summary>
-    public static async Task FillFieldAsync(this IPage page, string label, string value)
+    public static Task FillFieldAsync(this IPage page, string label, string value) => page.Form().FillInAsync(label, value);
+
+    private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+
+    /// <summary>Today in the company's zone, which the app's labels and "Next day" count from.</summary>
+    public static DateOnly LondonToday() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, London).DateTime);
+
+    /// <summary>A dialog by its heading.</summary>
+    public static ILocator Modal(this IPage page, string heading) =>
+        page.Locator("[role=dialog]").Filter(new() { Has = page.GetByRole(AriaRole.Heading, new() { Name = heading }) });
+
+    /// <summary>Fills a labelled field inside any scope (a dialog, a filter bar).</summary>
+    public static async Task FillInAsync(this ILocator scope, string label, string value)
     {
-        var matches = page.Form().GetByLabel(label, new() { Exact = true });
+        var matches = scope.GetByLabel(label, new() { Exact = true });
         await matches.First.WaitForAsync();
         for (var i = 0; i < await matches.CountAsync(); i++)
         {
             var match = matches.Nth(i);
             var tag = await match.EvaluateAsync<string>("e => e.tagName.toLowerCase()");
-            if (tag is "input" or "select" or "textarea")
+            if (tag == "select")
+            {
+                await match.SelectOptionAsync(new SelectOptionValue { Label = value });
+                return;
+            }
+            if (tag is "input" or "textarea")
             {
                 await match.FillAsync(value);
                 return;
@@ -51,10 +68,11 @@ public static class Pages
         throw new InvalidOperationException($"No fillable field labelled {label}");
     }
 
-    private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+    /// <summary>A table row containing the given text.</summary>
+    public static ILocator Row(this IPage page, string text) => page.GetByRole(AriaRole.Row).Filter(new() { HasText = text });
 
-    /// <summary>Today in the company's zone, which the app's labels and "Next day" count from.</summary>
-    public static DateOnly LondonToday() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, London).DateTime);
+    public static async Task GoToAsync(this IPage page, string link) =>
+        await page.GetByRole(AriaRole.Link, new() { Name = link, Exact = true }).ClickAsync();
 
     public static async Task ConfirmAsync(this IPage page) => await page.Form().Button("Confirm").ClickAsync();
 }

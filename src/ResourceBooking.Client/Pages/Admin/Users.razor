@@ -1,0 +1,155 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@inject ApiClient Api
+
+<PageTitle>Users</PageTitle>
+
+<h1>Users</h1>
+
+<div class="toolbar">
+    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="Add">Add user</FluentButton>
+</div>
+
+@if (message is not null)
+{
+    <div role="status"><FluentMessageBar Intent="MessageBarIntent.Success" AllowDismiss="false">@message</FluentMessageBar></div>
+}
+@if ((error ?? listError) is { } shown)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@shown</FluentMessageBar></div>
+}
+
+@if (users is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <table class="bookings">
+        <thead>
+            <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Email</th>
+                <th scope="col">Role</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var u in users)
+            {
+                <tr>
+                    <td>@u.DisplayName</td>
+                    <td>@u.Email</td>
+                    <td>@u.Role</td>
+                    <td>@(u.IsActive ? "Active" : "Inactive")</td>
+                    <td class="row-actions">
+                        @if (u.IsActive)
+                        {
+                            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => Edit(u)">Edit</FluentButton>
+                            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => deactivating = u">Deactivate</FluentButton>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (editing is not null)
+{
+    <Modal Id="user-form" Title="@(editingId is null ? "Add user" : $"Edit {editingName}")">
+        @if (formProblem is not null)
+        {
+            <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@formProblem.Message</FluentMessageBar></div>
+        }
+        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <label class="field"><span>Email</span><input type="email" @bind="editing.Email" required /></label>
+            <FieldError Problem="formProblem" Field="Email" />
+            <label class="field"><span>Display name</span><input @bind="editing.DisplayName" required /></label>
+            <FieldError Problem="formProblem" Field="DisplayName" />
+            <div class="field">
+                <label for="user-role">Role</label>
+                <select id="user-role" @bind="editing.Role">
+                    <option value="@Role.Employee">Employee</option>
+                    <option value="@Role.Admin">Admin</option>
+                </select>
+            </div>
+            <div class="actions">
+                <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary">Save</FluentButton>
+                <FluentButton OnClick="() => editing = null">Cancel</FluentButton>
+            </div>
+        </form>
+    </Modal>
+}
+
+@if (deactivating is not null)
+{
+    <Modal Id="deactivate-user" Title="@($"Deactivate {deactivating.DisplayName}")">
+        <p>@deactivating.DisplayName will no longer be able to sign in. Their future bookings will be cancelled; they won't be notified, as they can no longer sign in. This can't be undone here.</p>
+        <div class="actions">
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="DeactivateAsync">Deactivate</FluentButton>
+            <FluentButton OnClick="() => deactivating = null">Keep them</FluentButton>
+        </div>
+    </Modal>
+}
+
+@code {
+    private List<UserDto>? users;
+    private UserRequest? editing;
+    private Guid? editingId;
+    private string editingName = "";
+    private UserDto? deactivating;
+    private ApiProblem? formProblem;
+    private string? message;
+    private string? error;
+    private string? listError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await Api.UsersAsync();
+        listError = result.Problem?.Message;
+        users = result.Value ?? users ?? [];
+    }
+
+    private void Add()
+    {
+        editingId = null;
+        formProblem = null;
+        error = null;
+        editing = new UserRequest { Role = Role.Employee };
+    }
+
+    private void Edit(UserDto user)
+    {
+        editingId = user.Id;
+        editingName = user.DisplayName;
+        formProblem = null;
+        editing = new UserRequest { Email = user.Email, DisplayName = user.DisplayName, Role = user.Role };
+    }
+
+    private async Task SaveAsync()
+    {
+        var result = editingId is { } id ? await Api.UpdateUserAsync(id, editing!) : await Api.AddUserAsync(editing!);
+        formProblem = result.Problem;
+        if (result.Ok)
+        {
+            error = null;
+            message = editingId is null ? $"Added {result.Value!.DisplayName}." : $"Saved {result.Value!.DisplayName}.";
+            editing = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task DeactivateAsync()
+    {
+        var user = deactivating!;
+        deactivating = null;
+        var result = await Api.DeactivateAsync(user.Id);
+        error = result.Problem?.Message;
+        message = result.Ok ? $"{user.DisplayName} deactivated; {Plural.Bookings(result.Value!.Cancelled)} cancelled." : null;
+        await LoadAsync();
+    }
+}

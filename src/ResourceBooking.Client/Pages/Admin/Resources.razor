@@ -1,0 +1,245 @@
+@page "/admin/resources"
+@attribute [Authorize(Roles = "Admin")]
+@inject ApiClient Api
+@inject CompanyClock Clock
+
+<PageTitle>Resources</PageTitle>
+
+<h1>Resources</h1>
+
+<div class="toolbar">
+    <FluentButton Appearance="ButtonAppearance.Primary" OnClick="Add">Add resource</FluentButton>
+</div>
+
+@if (message is not null)
+{
+    <div role="status"><FluentMessageBar Intent="MessageBarIntent.Success" AllowDismiss="false">@message</FluentMessageBar></div>
+}
+@if (error is not null)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
+}
+
+@if (resources is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <table class="bookings">
+        <thead>
+            <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Type</th>
+                <th scope="col">Size</th>
+                <th scope="col">Open</th>
+                <th scope="col">Rules</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in resources)
+            {
+                <tr>
+                    <td>@r.Name</td>
+                    <td>@TypeName(r.Type)</td>
+                    <td>@(r.Type == ResourceType.Catering ? $"{r.Units} orders a day, {r.Capacity} portions each" : $"{r.Capacity} seats")</td>
+                    <td>@Hours(r)</td>
+                    <td>@RuleSummary(r)</td>
+                    <td>@(r.LastDay is { } last ? (last < Clock.Today ? $"Retired {last:d MMM yyyy}" : $"Last day {last:d MMM yyyy}") : "Active")</td>
+                    <td class="row-actions">
+                        <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => Edit(r)">Edit</FluentButton>
+                        @if (r.LastDay is null)
+                        {
+                            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => StartRetire(r)">Retire</FluentButton>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (form is not null)
+{
+    <Modal Id="resource-form" Title="@(editingId is null ? "Add resource" : $"Edit {editingName}")">
+        @if (formProblem is not null)
+        {
+            <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@formProblem.Message</FluentMessageBar></div>
+        }
+        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <div class="field">
+                <label for="resource-type">Type</label>
+                <select id="resource-type" @bind="form.Type" disabled="@(editingId is not null)">
+                    <option value="@ResourceType.MeetingRoom">Meeting room</option>
+                    <option value="@ResourceType.Car">Car</option>
+                    <option value="@ResourceType.Catering">Catering</option>
+                </select>
+            </div>
+            <label class="field"><span>Name</span><input @bind="form.Name" required /></label>
+            <FieldError Problem="formProblem" Field="Name" />
+            <label class="field"><span>@(form.Type == ResourceType.Catering ? "Portions per order" : "Seats")</span><input type="number" min="1" @bind="form.Capacity" /></label>
+            <FieldError Problem="formProblem" Field="Capacity" />
+            @if (Uses(RuleField.Units))
+            {
+                <label class="field"><span>Orders a day</span><input type="number" min="1" @bind="form.Units" /></label>
+                <FieldError Problem="formProblem" Field="Units" />
+            }
+            <label class="field"><span>Opens at</span><input type="time" @bind="form.OpensAt" /></label>
+            <label class="field"><span>Closes at</span><input type="time" @bind="form.ClosesAt" /></label>
+            <FieldError Problem="formProblem" Field="ClosesAt" />
+            <p class="hint">Leave a limit empty for none. London time.</p>
+            @if (Uses(RuleField.MinDuration))
+            {
+                <label class="field"><span>Shortest booking (minutes)</span><input type="number" min="1" @bind="form.MinMinutes" /></label>
+                <FieldError Problem="formProblem" Field="MinDuration" />
+            }
+            @if (Uses(RuleField.MaxDuration))
+            {
+                <label class="field"><span>Longest booking (hours)</span><input type="number" min="0" step="any" @bind="form.MaxHours" /></label>
+                <FieldError Problem="formProblem" Field="MaxDuration" />
+            }
+            @if (Uses(RuleField.MinNotice))
+            {
+                <label class="field"><span>Notice needed (hours)</span><input type="number" min="0" step="any" @bind="form.NoticeHours" /></label>
+                <FieldError Problem="formProblem" Field="MinNotice" />
+            }
+            @if (Uses(RuleField.MaxDaysAhead))
+            {
+                <label class="field"><span>Book up to (days ahead)</span><input type="number" min="1" max="365" @bind="form.MaxDaysAhead" /></label>
+                <FieldError Problem="formProblem" Field="MaxDaysAhead" />
+            }
+            @if (Uses(RuleField.Turnaround))
+            {
+                <label class="field"><span>Gap between bookings (minutes)</span><input type="number" min="1" @bind="form.GapMinutes" /></label>
+                <FieldError Problem="formProblem" Field="Turnaround" />
+            }
+            @if (Uses(RuleField.MaxFuturePerUser))
+            {
+                <label class="field"><span>Future bookings per person</span><input type="number" min="1" max="100" @bind="form.MaxFuturePerUser" /></label>
+                <FieldError Problem="formProblem" Field="MaxFuturePerUser" />
+            }
+            <div class="actions">
+                <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary">Save</FluentButton>
+                <FluentButton OnClick="() => form = null">Cancel</FluentButton>
+            </div>
+        </form>
+    </Modal>
+}
+
+@if (retiring is not null)
+{
+    <Modal Id="retire-resource" Title="@($"Retire {retiring.Name}")">
+        <p>@retiring.Name can be booked up to and including its last day. Its future bookings after it will be cancelled and their owners told.</p>
+        <label class="field"><span>Last day</span><input type="date" @bind="lastDay" /></label>
+        @if (retireProblem is not null)
+        {
+            <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@retireProblem.Message</FluentMessageBar></div>
+        }
+        <div class="actions">
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="RetireAsync">Retire</FluentButton>
+            <FluentButton OnClick="() => retiring = null">Keep it</FluentButton>
+        </div>
+    </Modal>
+}
+
+@code {
+    private List<ResourceDto>? resources;
+    private ResourceForm? form;
+    private Guid? editingId;
+    private string editingName = "";
+    private ResourceDto? retiring;
+    private DateOnly lastDay;
+    private ApiProblem? formProblem;
+    private ApiProblem? retireProblem;
+    private string? message;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var result = await Api.ResourcesAsync();
+        error = result.Problem?.Message;
+        resources = result.Value?.OrderBy(r => r.Type).ThenBy(r => r.Name).ToList() ?? resources ?? [];
+    }
+
+    private bool Uses(RuleField field) => RuleFields.For(form!.Type).Contains(field);
+
+    private void Add()
+    {
+        editingId = null;
+        formProblem = null;
+        form = new ResourceForm();
+    }
+
+    private void Edit(ResourceDto r)
+    {
+        editingId = r.Id;
+        editingName = r.Name;
+        formProblem = null;
+        form = ResourceForm.From(r);
+    }
+
+    private void StartRetire(ResourceDto r)
+    {
+        retireProblem = null;
+        lastDay = Clock.Today;
+        retiring = r;
+    }
+
+    private async Task SaveAsync()
+    {
+        var request = form!.ToRequest();
+        var result = editingId is { } id ? await Api.UpdateResourceAsync(id, request) : await Api.AddResourceAsync(request);
+        formProblem = result.Problem;
+        if (result.Ok)
+        {
+            message = editingId is null ? $"Added {result.Value!.Name}." : $"Saved {result.Value!.Name}.";
+            form = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task RetireAsync()
+    {
+        var resource = retiring!;
+        var result = await Api.RetireAsync(resource.Id, lastDay);
+        retireProblem = result.Problem;
+        if (result.Ok)
+        {
+            retiring = null;
+            var n = result.Value!.Cancelled;
+            message = $"{resource.Name} retired; {Plural.Bookings(n)} cancelled.";
+            await LoadAsync();
+        }
+    }
+
+    private static string Hours(ResourceDto r) => (r.OpensAt, r.ClosesAt) switch
+    {
+        ({ } o, { } c) => $"{o:HH:mm}-{c:HH:mm}",
+        ({ } o, null) => $"From {o:HH:mm}",
+        (null, { } c) => $"Until {c:HH:mm}",
+        _ => "All day",
+    };
+
+    private static string TypeName(ResourceType t) => t switch
+    {
+        ResourceType.MeetingRoom => "Meeting room",
+        ResourceType.Car => "Car",
+        _ => "Catering",
+    };
+
+    private static string RuleSummary(ResourceDto r)
+    {
+        var parts = new List<string>();
+        if (r.MinDuration is { } min) parts.Add($"at least {min.TotalMinutes:0} min");
+        if (r.MaxDuration is { } max) parts.Add($"at most {max.TotalHours:0.#} h");
+        if (r.MinNotice is { } notice) parts.Add($"{notice.TotalHours:0.#} h notice");
+        if (r.MaxDaysAhead is { } ahead) parts.Add($"up to {ahead} days ahead");
+        if (r.Turnaround is { } gap) parts.Add($"{gap.TotalMinutes:0} min gap");
+        if (r.MaxFuturePerUser is { } most) parts.Add($"{most} per person");
+        return parts.Count == 0 ? "None" : string.Join(", ", parts);
+    }
+}
