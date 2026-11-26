@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using ResourceBooking.Bookings;
@@ -87,7 +88,7 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
         {
             return refusal;
         }
-        if (deliveryAt is not null && await WrongKitchenAsync(resourceId, ct) is { } notAKitchen)
+        if (Local(deliveryAt) is { } delivery && await NotAKitchenAsync(resourceId, DateOnly.FromDateTime(delivery), ct) is { } notAKitchen)
         {
             return notAKitchen;
         }
@@ -161,11 +162,23 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     }
 
     /// <summary>
-    /// Saves an open proposal. Not with the request's token: a proposal half-saved when the turn timed out would
-    /// stay tracked and be sent again by the reply's trace save. A failed save is let go of for the same reason.
+    /// Saves an open proposal and returns its id, or returns the id of an identical proposal already open this turn:
+    /// the model sometimes proposes the same thing twice. Saved without the request's token: a proposal half-saved
+    /// when the turn timed out would stay tracked and be sent again by the reply's trace save. A failed save is let
+    /// go of for the same reason.
     /// </summary>
     private async Task<Guid> StoreAsync(ProposalKind kind, Guid? bookingId, string payload)
     {
+        // Compared as JSON: jsonb stores its own normalised text.
+        var wanted = JsonNode.Parse(payload);
+        var same = await db.Proposals.AsNoTracking()
+            .Where(p => p.ConversationId == conversationId && p.Turn == turn && p.Status == ProposalStatus.Open
+                && p.Kind == kind && p.BookingId == bookingId)
+            .Select(p => new { p.Id, p.Payload }).ToListAsync(CancellationToken.None);
+        if (same.FirstOrDefault(p => JsonNode.DeepEquals(JsonNode.Parse(p.Payload), wanted)) is { } existing)
+        {
+            return existing.Id;
+        }
         var proposal = new Proposal
         {
             Id = Guid.CreateVersion7(),
@@ -178,16 +191,6 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
             Status = ProposalStatus.Open,
             CreatedAt = clock.GetUtcNow(),
         };
-        // The model sometimes proposes the same thing twice in a turn; offer it once. Compared as JSON: jsonb
-        // stores its own normalised text.
-        var same = await db.Proposals.AsNoTracking()
-            .Where(p => p.ConversationId == conversationId && p.Turn == turn && p.Status == ProposalStatus.Open
-                && p.Kind == kind && p.BookingId == bookingId)
-            .Select(p => new { p.Id, p.Payload }).ToListAsync(CancellationToken.None);
-        if (same.FirstOrDefault(p => System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(p.Payload), System.Text.Json.Nodes.JsonNode.Parse(payload))) is { } existing)
-        {
-            return existing.Id;
-        }
         db.Proposals.Add(proposal);
         try
         {
@@ -227,19 +230,25 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     private static DateTime? Local(string? text) =>
         DateTime.TryParseExact(text?.Trim(), Formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t) ? t : null;
 
+    private const int KitchensListed = 10;
+
     /// <summary>
     /// A catering order sent with a room (or anything but a kitchen) as its resource: the refusal says which field is
-    /// which and lists the kitchens, so the model can send it again without another search.
+    /// which and lists up to <see cref="KitchensListed"/> kitchens taking orders that day, so the model can send it
+    /// again without another search.
     /// </summary>
-    private async Task<string?> WrongKitchenAsync(Guid resourceId, CancellationToken ct)
+    private async Task<string?> NotAKitchenAsync(Guid resourceId, DateOnly day, CancellationToken ct)
     {
         if (await db.Resources.AsNoTracking().AnyAsync(r => r.Id == resourceId && r.Type == ResourceType.Catering, ct))
         {
             return null;
         }
-        var kitchens = await db.Resources.AsNoTracking().Where(r => r.Type == ResourceType.Catering && r.LastDay == null)
-            .OrderBy(r => r.Name).Select(r => $"{r.Name} ({r.Id})").ToListAsync(ct);
-        return $"Not proposed: for a catering order resourceId is the kitchen and deliveryRoomId is the room. Kitchens: {string.Join(", ", kitchens)}.";
+        var kitchens = await db.Resources.AsNoTracking()
+            .Where(r => r.Type == ResourceType.Catering && (r.LastDay == null || r.LastDay >= day))
+            .OrderBy(r => r.Name).Select(r => new { r.Name, r.Id }).ToListAsync(ct);
+        var listed = string.Join(", ", kitchens.Take(KitchensListed).Select(k => $"{k.Name} ({k.Id})"));
+        var more = kitchens.Count > KitchensListed ? $" and {kitchens.Count - KitchensListed} more (use find_free_resources)" : "";
+        return $"Not proposed: for a catering order resourceId is the kitchen and deliveryRoomId is the room. Kitchens: {(listed == "" ? "none that day" : listed)}{more}.";
     }
 
     /// <summary>A refusal naming the first time given that isn't a full date and time, so it isn't silently ignored.</summary>

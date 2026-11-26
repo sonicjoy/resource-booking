@@ -446,6 +446,61 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_room_proposal_with_a_blank_delivery_time_is_still_a_room_proposal()
+    {
+        _app.Model.On("a room", "Here.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees = 6, deliveryAt = "" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "a room for 6 tomorrow at 2pm"));
+
+        Assert.Equal(Seed.ThamesId, Assert.Single(reply.Proposals).Request!.ResourceId);
+    }
+
+    [Fact]
+    public async Task A_reply_cut_off_at_the_output_cap_says_the_assistant_could_not_answer()
+    {
+        _app.Model.On("hello", "");
+        _app.Model.FinishReason = ChatFinishReason.Length;
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
+    }
+
+    [Fact]
+    public async Task The_kitchens_listed_in_a_refusal_include_one_retiring_after_the_delivery_day()
+    {
+        await using (var db = _app.Db())
+        {
+            db.Resources.Add(new Resource
+            {
+                Id = Guid.CreateVersion7(),
+                Name = "North Kitchen",
+                Type = ResourceType.Catering,
+                Capacity = 20,
+                Units = 2,
+                OpensAt = new TimeOnly(8, 0),
+                ClosesAt = new TimeOnly(16, 0),
+                MaxDaysAhead = 90,
+                LastDay = new DateOnly(2026, 11, 27),
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+        _app.Model.On("lunch", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, deliveryAt = $"{Tomorrow}T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "lunch for 8 in Thames at 12:30 tomorrow"));
+
+        await using var check = _app.Db();
+        var payload = (await check.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("North Kitchen", payload);
+        Assert.Contains("Main Kitchen", payload);
+    }
+
+    [Fact]
     public async Task The_same_proposal_twice_in_one_turn_is_offered_once()
     {
         _app.Model.On("a room", "Here.", ProposeRoom(Seed.SevernId, "09:00", "12:00", 10), ProposeRoom(Seed.SevernId, "09:00", "12:00", 10));

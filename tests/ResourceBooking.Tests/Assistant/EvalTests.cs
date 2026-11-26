@@ -68,13 +68,13 @@ public class EvalTests(DbFixture fixture)
                 var match = unmatched.FirstOrDefault(p => Matches(expected, p, reply.Proposals, names, resourceOfBooking));
                 if (match is null)
                 {
-                    Assert.Fail($"Turn \"{turn.Text}\": no proposal matches {JsonSerializer.Serialize(expected)}; got: {Describe(reply)}{await ToolsAsync(app, reply.ConversationId)}");
+                    Assert.Fail($"Turn \"{turn.Text}\": no proposal matches {JsonSerializer.Serialize(expected)}; got: {Describe(reply)}{await ToolCallsAsync(app, reply.ConversationId)}");
                 }
                 unmatched.Remove(match);
             }
             if (unmatched.Count > 0)
             {
-                Assert.Fail($"Turn \"{turn.Text}\": unexpected proposals: {Describe(reply)}{await ToolsAsync(app, reply.ConversationId)}");
+                Assert.Fail($"Turn \"{turn.Text}\": unexpected proposals: {Describe(reply)}{await ToolCallsAsync(app, reply.ConversationId)}");
             }
         }
 
@@ -121,7 +121,7 @@ public class EvalTests(DbFixture fixture)
     private static DateTime Local(string text) => DateTime.Parse(text, CultureInfo.InvariantCulture);
 
     /// <summary>The tool calls the model made in the conversation and what each returned, to tell a model that skipped a step from a tool that refused it.</summary>
-    private static async Task<string> ToolsAsync(ApiFactory app, Guid conversationId)
+    private static async Task<string> ToolCallsAsync(ApiFactory app, Guid conversationId)
     {
         await using var db = app.Db();
         var calls = await db.AssistantSteps.AsNoTracking()

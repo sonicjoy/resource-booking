@@ -24,6 +24,9 @@ public sealed class StubChatClient : IChatClient
     /// <summary>How each response reports its token usage: in full, without a total, or not at all.</summary>
     public UsageReport Usage { get; set; }
 
+    /// <summary>The finish reason of each final reply, to test a reply cut off at the output cap.</summary>
+    public ChatFinishReason? FinishReason { get; set; }
+
     /// <summary>Asks for the scripted tool calls on every call, never replying, to test the loop cap.</summary>
     public bool NeverReply { get; set; }
 
@@ -73,7 +76,7 @@ public sealed class StubChatClient : IChatClient
         var sinceUser = list.SkipWhile(m => m != list.Last(x => x.Role == ChatRole.User)).Skip(1);
         if (script.Calls.Count == 0 || (!NeverReply && sinceUser.Any(m => m.Contents.OfType<FunctionResultContent>().Any())))
         {
-            return new ChatResponse(new ChatMessage(ChatRole.Assistant, script.Reply)) { Usage = usage };
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, script.Reply)) { Usage = usage, FinishReason = FinishReason };
         }
 
         var contents = script.Calls.Select((c, i) => (AIContent)new FunctionCallContent($"call{Calls.Count}_{i}", c.Name,
