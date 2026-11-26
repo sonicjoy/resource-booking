@@ -130,6 +130,8 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     [Theory]
     [InlineData("/api/availability?date=9999-12-31&type=MeetingRoom")]
     [InlineData("/api/resources/free?type=Car&start=9999-12-31T22:00&end=9999-12-31T23:30&attendees=1")]
+    [InlineData("/api/bookings/mine?to=9999-12-31")]
+    [InlineData("/api/bookings/mine?from=9999-12-31")]
     public async Task Reads_at_the_end_of_the_calendar_are_400(string url)
     {
         var ana = await _app.SignedInAsync(Seed.AnaId);
@@ -414,6 +416,23 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_booking_under_way_cannot_be_changed_or_cancelled()
+    {
+        var (_, booking) = await AnaBooksThamesAsync();
+        _app.Clock.SetUtcNow(new DateTimeOffset(2026, 11, 26, 14, 30, 0, TimeSpan.Zero));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var cancel = await ana.DeleteAsync($"/api/bookings/{booking.Id}", Ct);
+        var edit = await ana.PutAsJsonAsync($"/api/bookings/{booking.Id}", Room(Seed.ThamesId, "14:00", "16:00"), Ct);
+
+        foreach (var response in new[] { cancel, edit })
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            Assert.Equal("ALREADY_STARTED", (await Body(response)).GetProperty("code").GetString());
+        }
+    }
+
+    [Fact]
     public async Task Every_booking_write_leaves_its_audit_event()
     {
         var (ana, booking) = await AnaBooksThamesAsync();
@@ -543,6 +562,38 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
         var (_, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: "Renamed");
 
         Assert.True(proposal.ChangedBeforeConfirm);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_empty_title_against_a_proposal_without_one_is_not_a_change(string title)
+    {
+        var (booking, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: title);
+
+        Assert.False(proposal.ChangedBeforeConfirm);
+        Assert.Null(booking.Title);
+    }
+
+    [Fact]
+    public async Task A_booking_sent_with_a_proposal_another_request_holds_goes_ahead_unlinked_without_waiting()
+    {
+        var proposalId = await ProposalAsync(Seed.AnaId);
+        await using var holder = _app.Db();
+        await using var hold = await holder.Database.BeginTransactionAsync(Ct);
+        await holder.Database.ExecuteSqlAsync($"SELECT 1 FROM proposals WHERE id = {proposalId} FOR UPDATE", Ct);
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        var response = await ana.PostAsJsonAsync("/api/bookings",
+            new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees = 6, proposalId }, timeout.Token);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var id = (await response.Content.ReadFromJsonAsync<BookingDto>(Ct))!.Id;
+        await hold.RollbackAsync(Ct);
+        await using var db = _app.Db();
+        Assert.Null((await db.Bookings.SingleAsync(b => b.Id == id, Ct)).ProposalId);
     }
 
     [Fact]

@@ -165,7 +165,7 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         booking.EndsAt = candidate.End;
         booking.BlockedUntil = candidate.End + Turnaround(resource);
         booking.Attendees = request.Attendees;
-        booking.Title = request.Title;
+        booking.Title = Title(request);
         booking.DeliveryAt = candidate.DeliveryAt;
         booking.DeliveryRoomId = resource.Type == ResourceType.Catering ? request.DeliveryRoomId : null;
         booking.UnitNo = context.FreeUnit ?? 0;
@@ -278,8 +278,9 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         {
             return;
         }
-        // Locked, so two bookings sent with the same proposal can't both confirm it.
-        var proposal = await db.Proposals.FromSql($"SELECT * FROM proposals WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(ct);
+        // Locked, so two bookings sent with the same proposal can't both confirm it. SKIP LOCKED: a second
+        // request books unlinked instead of waiting, which could deadlock against the delivery room's key lock.
+        var proposal = await db.Proposals.FromSql($"SELECT * FROM proposals WHERE id = {id} FOR UPDATE SKIP LOCKED").SingleOrDefaultAsync(ct);
         var fresh = proposal is not null && clock.GetUtcNow() - proposal.CreatedAt < TimeSpan.FromHours(24);
         var rightTarget = kind == ProposalKind.Create || proposal?.BookingId == booking.Id;
         if (proposal is null || proposal.UserId != callerId || proposal.Status != ProposalStatus.Open || !fresh
@@ -313,8 +314,10 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
 
     /// <summary>The values a booking keeps from a request: a catering order's start and end come from its delivery day.</summary>
     private static object Submitted(BookingRequest r) => r.DeliveryAt is null
-        ? (r.ResourceId, r.Start, r.End, r.Attendees, r.Title, (DateTime?)null, (Guid?)null)
-        : (r.ResourceId, (DateTime?)null, (DateTime?)null, r.Attendees, r.Title, r.DeliveryAt, r.DeliveryRoomId);
+        ? (r.ResourceId, r.Start, r.End, r.Attendees, Title(r), (DateTime?)null, (Guid?)null)
+        : (r.ResourceId, (DateTime?)null, (DateTime?)null, r.Attendees, Title(r), r.DeliveryAt, r.DeliveryRoomId);
+
+    private static string? Title(BookingRequest r) => string.IsNullOrWhiteSpace(r.Title) ? null : r.Title.Trim();
 
     /// <summary>The gap a resource needs between bookings; only types whose rule fields include it have one.</summary>
     public static TimeSpan Turnaround(Resource resource) =>
