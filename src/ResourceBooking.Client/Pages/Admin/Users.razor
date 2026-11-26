@@ -58,7 +58,7 @@ else
 
 @if (editing is not null)
 {
-    <Modal Id="user-form" Title="@(editingId is null ? "Add user" : $"Edit {editing.DisplayName}")">
+    <Modal Id="user-form" Title="@(editingId is null ? "Add user" : $"Edit {editingName}")">
         @if (formProblem is not null)
         {
             <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@formProblem.Message</FluentMessageBar></div>
@@ -98,6 +98,7 @@ else
     private List<UserDto>? users;
     private UserRequest? editing;
     private Guid? editingId;
+    private string editingName = "";
     private UserDto? deactivating;
     private ApiProblem? formProblem;
     private string? message;
@@ -122,6 +123,7 @@ else
     private void Edit(UserDto user)
     {
         editingId = user.Id;
+        editingName = user.DisplayName;
         formProblem = null;
         editing = new UserRequest { Email = user.Email, DisplayName = user.DisplayName, Role = user.Role };
     }
@@ -144,9 +146,7 @@ else
         deactivating = null;
         var result = await Api.DeactivateAsync(user.Id);
         error = result.Problem?.Message;
-        message = result.Ok ? $"{user.DisplayName} deactivated; {Bookings(result.Value!.Cancelled)} cancelled." : null;
+        message = result.Ok ? $"{user.DisplayName} deactivated; {Plural.Bookings(result.Value!.Cancelled)} cancelled." : null;
         await LoadAsync();
     }
-
-    private static string Bookings(int n) => n == 1 ? "1 booking" : $"{n} bookings";
 }

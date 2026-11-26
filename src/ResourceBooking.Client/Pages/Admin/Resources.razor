@@ -63,7 +63,7 @@ else
 
 @if (form is not null)
 {
-    <Modal Id="resource-form" Title="@(editingId is null ? "Add resource" : $"Edit {form.Name}")">
+    <Modal Id="resource-form" Title="@(editingId is null ? "Add resource" : $"Edit {editingName}")">
         @if (formProblem is not null)
         {
             <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@formProblem.Message</FluentMessageBar></div>
@@ -140,6 +140,7 @@ else
     private List<ResourceDto>? resources;
     private ResourceForm? form;
     private Guid? editingId;
+    private string editingName = "";
     private ResourceDto? retiring;
     private DateOnly lastDay;
     private ApiProblem? formProblem;
@@ -168,6 +169,7 @@ else
     private void Edit(ResourceDto r)
     {
         editingId = r.Id;
+        editingName = r.Name;
         formProblem = null;
         form = ResourceForm.From(r);
     }
@@ -201,7 +203,7 @@ else
         {
             retiring = null;
             var n = result.Value!.Cancelled;
-            message = $"{resource.Name} retired; {(n == 1 ? "1 booking" : $"{n} bookings")} cancelled.";
+            message = $"{resource.Name} retired; {Plural.Bookings(n)} cancelled.";
             await LoadAsync();
         }
     }

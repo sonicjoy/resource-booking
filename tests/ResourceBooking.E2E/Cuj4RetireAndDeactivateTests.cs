@@ -18,7 +18,7 @@ public class Cuj4RetireAndDeactivateTests(AppFixture app) : IAsyncLifetime
         var sam = await app.SignInAsync("Sam");
 
         await sam.GoToAsync("Resources");
-        await sam.Row("Severn").Locator("fluent-button, button").Filter(new() { HasText = "Retire" }).ClickAsync();
+        await sam.Row("Severn").Button("Retire").ClickAsync();
         var retire = sam.Modal("Retire Severn");
         await Expect(retire).ToContainTextAsync("future bookings after it will be cancelled and their owners told");
         await retire.FillInAsync("Last day", Pages.LondonToday().AddDays(1).ToString("yyyy-MM-dd"));
@@ -26,7 +26,7 @@ public class Cuj4RetireAndDeactivateTests(AppFixture app) : IAsyncLifetime
         await Expect(sam.Locator("[role=status]")).ToContainTextAsync("Severn retired; 1 booking cancelled");
 
         await sam.GoToAsync("Users");
-        await sam.Row("ben@sonicjoy-solutions.com").Locator("fluent-button, button").Filter(new() { HasText = "Deactivate" }).ClickAsync();
+        await sam.Row("ben@sonicjoy-solutions.com").Button("Deactivate").ClickAsync();
         await sam.Modal("Deactivate Ben").Button("Deactivate").ClickAsync();
         await Expect(sam.Locator("[role=status]")).ToContainTextAsync("Ben deactivated; 2 bookings cancelled");
         await Expect(sam.Row("ben@sonicjoy-solutions.com")).ToContainTextAsync("Inactive");
@@ -37,6 +37,7 @@ public class Cuj4RetireAndDeactivateTests(AppFixture app) : IAsyncLifetime
         var ana = await app.SignInAsync("Ana");
         await ana.Button("Notices (1 unread)").ClickAsync();
         await Expect(ana.Locator("[role=dialog]").Filter(new() { HasText = "Notices" })).ToContainTextAsync("Severn");
+        // Two days ahead: the day after Severn's last day.
         await ana.GoToTomorrowAsync();
         await ana.GoToTomorrowAsync();
         await Expect(ana.Locator(".grid")).Not.ToContainTextAsync("Severn");

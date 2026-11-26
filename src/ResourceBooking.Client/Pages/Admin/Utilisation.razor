@@ -72,7 +72,7 @@
         rows = result.Value ?? rows;
     }
 
-    private static string Used(UtilisationRow r) => r.Unit == "unit-days"
+    private static string Used(UtilisationRow r) => r.Type == ResourceType.Catering
         ? $"{r.Used:0} of {r.Available:0} unit-days"
         : $"{r.Used:0.#} of {r.Available:0.#} hours";
 }

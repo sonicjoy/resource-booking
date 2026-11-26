@@ -29,27 +29,7 @@ public static class Pages
     /// Fills a field in the booking form by its label. A Fluent input is a web component with the real
     /// input in its shadow root, so the matched custom element is filled through that input.
     /// </summary>
-    public static async Task FillFieldAsync(this IPage page, string label, string value)
-    {
-        var matches = page.Form().GetByLabel(label, new() { Exact = true });
-        await matches.First.WaitForAsync();
-        for (var i = 0; i < await matches.CountAsync(); i++)
-        {
-            var match = matches.Nth(i);
-            var tag = await match.EvaluateAsync<string>("e => e.tagName.toLowerCase()");
-            if (tag is "input" or "select" or "textarea")
-            {
-                await match.FillAsync(value);
-                return;
-            }
-            if (tag.StartsWith("fluent-", StringComparison.Ordinal))
-            {
-                await match.Locator("input").FillAsync(value);
-                return;
-            }
-        }
-        throw new InvalidOperationException($"No fillable field labelled {label}");
-    }
+    public static Task FillFieldAsync(this IPage page, string label, string value) => page.Form().FillInAsync(label, value);
 
     private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
 

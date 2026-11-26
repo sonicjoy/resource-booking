@@ -53,6 +53,9 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
         { "POST", $"/api/users/{Seed.BenId}/deactivation" },
         { "GET", "/api/reports/utilisation?from=2026-11-18&to=2026-11-24" },
         { "GET", "/api/history" },
+        { "GET", $"/api/users/{Seed.BenId}" },
+        { "PUT", $"/api/users/{Seed.BenId}" },
+        { "PUT", $"/api/resources/{Seed.SevernId}" },
     };
 
     [Theory]
