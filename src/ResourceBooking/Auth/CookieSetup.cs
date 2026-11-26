@@ -30,9 +30,10 @@ public static class CookieSetup
                 options.ExpireTimeSpan = TimeSpan.FromHours(8);
                 options.SlidingExpiration = true;
 
-                // The client is a WebAssembly app: API calls get status codes, never a redirect.
-                options.Events.OnRedirectToLogin = context => Status(context.Response, StatusCodes.Status401Unauthorized);
-                options.Events.OnRedirectToAccessDenied = context => Status(context.Response, StatusCodes.Status403Forbidden);
+                // API calls get status codes, never a redirect. A page the browser asks for (one marked
+                // [Authorize]) sends a signed-out visitor to sign-in and someone without the role to Book.
+                options.Events.OnRedirectToLogin = context => Challenge(context, StatusCodes.Status401Unauthorized, "/sign-in");
+                options.Events.OnRedirectToAccessDenied = context => Challenge(context, StatusCodes.Status403Forbidden, "/");
                 options.Events.OnValidatePrincipal = ValidateAsync;
             });
 
@@ -74,9 +75,16 @@ public static class CookieSetup
         }
     }
 
-    private static Task Status(HttpResponse response, int status)
+    private static Task Challenge(RedirectContext<CookieAuthenticationOptions> context, int status, string page)
     {
-        response.StatusCode = status;
+        if (context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.StatusCode = status;
+        }
+        else
+        {
+            context.Response.Redirect(page);
+        }
         return Task.CompletedTask;
     }
 }

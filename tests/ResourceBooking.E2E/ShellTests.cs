@@ -19,4 +19,17 @@ public class ShellTests(AppFixture app) : IAsyncLifetime
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Users" })).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByText("London time").First).ToBeVisibleAsync();
     }
+
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/my-bookings")]
+    public async Task A_signed_out_visitor_is_sent_to_sign_in(string path)
+    {
+        var context = await app.Browser.NewContextAsync(new() { BaseURL = app.BaseUrl });
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync(path);
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Sign in" })).ToBeVisibleAsync();
+    }
 }
