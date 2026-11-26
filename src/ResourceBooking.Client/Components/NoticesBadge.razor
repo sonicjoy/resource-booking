@@ -45,11 +45,12 @@
         await LoadAsync();
     }
 
-    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-    {
-        await LoadAsync();
-        await InvokeAsync(StateHasChanged);
-    }
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
 
     private async Task LoadAsync() => notices = (await Api.NoticesAsync()).Value ?? notices;
 

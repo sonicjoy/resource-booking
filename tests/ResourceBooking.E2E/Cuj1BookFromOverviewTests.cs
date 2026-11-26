@@ -96,6 +96,9 @@ public class Cuj1BookFromOverviewTests(AppFixture app) : IAsyncLifetime
         // and no booking can start at 08:00 or 08:30.
         await Expect(ana.Cell("Pool Car 1", "08:00")).ToHaveAttributeAsync("aria-label", "Pool Car 1, 08:00, turnaround gap");
         await Expect(ana.Cell("Pool Car 1", "08:30")).ToHaveAttributeAsync("aria-label", "Pool Car 1, 08:30, turnaround gap");
+        await ana.Cell("Pool Car 1", "07:30").ClickAsync();
+        await Expect(ana.Form().GetByLabel("End", new() { Exact = true })).ToHaveValueAsync("08:00");
+        await ana.Form().Button("Cancel").ClickAsync();
         await ana.Cell("Pool Car 1", "07:00").ClickAsync();
 
         await Expect(ana.Form().GetByLabel("End", new() { Exact = true })).ToHaveValueAsync("08:00");

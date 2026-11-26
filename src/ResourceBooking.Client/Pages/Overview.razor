@@ -27,7 +27,7 @@
         }
     </div>
 }
-@if (error is not null)
+@if ((resourcesError ?? dayError) is { } error)
 {
     <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
 }
@@ -113,7 +113,8 @@ else
     private List<ResourceDto> kitchens = [];
     private BookingDraft? draft;
     private Saved? saved;
-    private string? error;
+    private string? resourcesError;
+    private string? dayError;
 
     private sealed record Saved(BookingDto Booking, string Text);
 
@@ -130,7 +131,7 @@ else
     {
         date = Clock.Today;
         var list = await Api.ResourcesAsync();
-        error = list.Problem?.Message;
+        resourcesError = list.Problem?.Message;
         resources = list.Value?.ToDictionary(r => r.Id) ?? [];
         kitchens = resources.Values.Where(r => r.Type == ResourceType.Catering).OrderBy(r => r.Name).ToList();
         await LoadAsync();
@@ -147,7 +148,7 @@ else
         {
             return;
         }
-        error = result.Problem?.Message ?? error;
+        dayError = result.Problem?.Message;
         day = result.Value;
         slots = day is null ? [] : SlotsFor(day.Resources);
     }

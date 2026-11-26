@@ -68,7 +68,7 @@ public sealed class ApiClient(HttpClient http)
             }
             return new(await response.Content.ReadFromJsonAsync<T>(), null);
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
         {
             return new(default, ApiProblem.Unreachable);
         }
