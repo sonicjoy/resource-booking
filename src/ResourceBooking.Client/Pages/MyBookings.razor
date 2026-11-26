@@ -77,27 +77,23 @@ else
 
 @if (draft is not null)
 {
-    <BookingForm Draft="draft" Rooms="rooms" OnSaved="SavedAsync" OnCancel="() => draft = null" />
+    <BookingForm Draft="draft" OnSaved="SavedAsync" OnCancel="() => draft = null" />
 }
 
 @if (cancelling is not null)
 {
-    <div class="backdrop">
-        <div class="confirm" role="dialog" aria-modal="true" aria-labelledby="cancel-title">
-            <h2 id="cancel-title">Cancel this booking?</h2>
-            <p>@cancelling.ResourceName, @When(cancelling). This can't be undone.</p>
-            <div class="actions">
-                <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CancelAsync">Cancel booking</FluentButton>
-                <FluentButton OnClick="() => cancelling = null">Keep it</FluentButton>
-            </div>
+    <Modal Id="cancel-booking" Title="Cancel this booking?">
+        <p>@cancelling.ResourceName, @When(cancelling). This can't be undone.</p>
+        <div class="actions">
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CancelAsync">Cancel booking</FluentButton>
+            <FluentButton OnClick="() => cancelling = null">Keep it</FluentButton>
         </div>
-    </div>
+    </Modal>
 }
 
 @code {
     private string tab = "upcoming";
     private List<BookingDto>? bookings;
-    private List<ResourceDto> rooms = [];
     private BookingDraft? draft;
     private BookingDto? cancelling;
     private string? message;
@@ -117,8 +113,6 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        var resources = await Api.ResourcesAsync();
-        rooms = resources.Value?.Where(r => r.Type == ResourceType.MeetingRoom).OrderBy(r => r.Name).ToList() ?? [];
         await LoadAsync();
     }
 

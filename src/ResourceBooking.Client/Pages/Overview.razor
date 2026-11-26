@@ -99,7 +99,7 @@ else
 
 @if (draft is not null)
 {
-    <BookingForm Draft="draft" Rooms="rooms" OnSaved="SavedAsync" OnCancel="() => draft = null" />
+    <BookingForm Draft="draft" OnSaved="SavedAsync" OnCancel="() => draft = null" />
 }
 
 @code {
@@ -110,7 +110,6 @@ else
     private AvailabilityDay? day;
     private List<TimeOnly> slots = [];
     private Dictionary<Guid, ResourceDto> resources = [];
-    private List<ResourceDto> rooms = [];
     private List<ResourceDto> kitchens = [];
     private BookingDraft? draft;
     private Saved? saved;
@@ -132,14 +131,21 @@ else
         date = Clock.Today;
         var list = await Api.ResourcesAsync();
         resources = list.Value?.ToDictionary(r => r.Id) ?? [];
-        rooms = resources.Values.Where(r => r.Type == ResourceType.MeetingRoom).OrderBy(r => r.Name).ToList();
         kitchens = resources.Values.Where(r => r.Type == ResourceType.Catering).OrderBy(r => r.Name).ToList();
         await LoadAsync();
     }
 
+    private int load;
+
+    /// <summary>Loads the picked day; a slower answer for a day picked earlier is dropped.</summary>
     private async Task LoadAsync()
     {
+        var mine = ++load;
         var result = await Api.AvailabilityAsync(date, Type);
+        if (mine != load)
+        {
+            return;
+        }
         error = result.Problem?.Message;
         day = result.Value;
         slots = day is null ? [] : SlotsFor(day.Resources);
@@ -226,9 +232,24 @@ else
             ResourceName = resource.Name,
             Type = resource.Type,
             Date = date,
+            EndDate = date,
             Start = slot,
-            End = slot.AddHours(1),
+            End = DefaultEnd(resource, slot),
         };
+    }
+
+    /// <summary>An hour from the cell, or less where the next booking, turnaround gap or closing time comes first.</summary>
+    private TimeOnly DefaultEnd(ResourceAvailability resource, TimeOnly slot)
+    {
+        var end = slot.AddHours(1) < slot ? TimeOnly.MaxValue : slot.AddHours(1);
+        for (var t = slot.Add(Slot); t < end; t = t.Add(Slot))
+        {
+            if (CellFor(resource, t).Kind != "free")
+            {
+                return t;
+            }
+        }
+        return resource.ClosesAt is { } closes && closes < end ? closes : end;
     }
 
     private void Order(ResourceAvailability kitchen)

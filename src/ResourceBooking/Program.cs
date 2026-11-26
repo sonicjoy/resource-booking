@@ -1,4 +1,3 @@
-using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using ResourceBooking.Auth;
@@ -10,9 +9,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
-builder.Services.AddFluentUIComponents();
 
-var companyZone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["Booking:TimeZone"] ?? "Europe/London");
+var companyZone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["Booking:TimeZone"] ?? ResourceBooking.Shared.ApiCodes.CompanyZone);
 builder.Services.AddSingleton(companyZone);
 builder.Services.AddSingleton(TimeProvider.System);
 

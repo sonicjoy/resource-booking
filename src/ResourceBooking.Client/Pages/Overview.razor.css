@@ -119,15 +119,4 @@
     font-size: 1.125rem;
 }
 
-.hint {
-    color: var(--colorNeutralForeground3, #616161);
-    font-size: 0.8125rem;
-}
 
-.visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-}

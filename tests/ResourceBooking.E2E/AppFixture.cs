@@ -53,16 +53,23 @@ public sealed class AppFixture : IAsyncLifetime
     /// <summary>Restores the seed, signed in as Sam the admin, so each journey starts from the same data.</summary>
     public async Task ReseedAsync()
     {
-        using var http = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri(BaseUrl) };
-        http.DefaultRequestHeaders.Add("Origin", BaseUrl);
-        (await http.PostAsJsonAsync("/api/auth/sign-in", new { userId = Seed.SamId })).EnsureSuccessStatusCode();
+        using var http = await ApiAsAsync(Seed.SamId);
         (await http.PostAsync("/api/admin/reseed", null)).EnsureSuccessStatusCode();
     }
 
-    /// <summary>A fresh browser context signed in as the given seeded user through the sign-in page, landed on Book.</summary>
-    public async Task<IPage> SignInAsync(string displayName)
+    /// <summary>An API client signed in as a seeded user, for setting up a journey's data.</summary>
+    public async Task<HttpClient> ApiAsAsync(Guid userId)
     {
-        var context = await Browser.NewContextAsync(new() { BaseURL = BaseUrl, Locale = "en-GB", TimezoneId = "Europe/London" });
+        var http = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri(BaseUrl) };
+        http.DefaultRequestHeaders.Add("Origin", BaseUrl);
+        (await http.PostAsJsonAsync("/api/auth/sign-in", new { userId })).EnsureSuccessStatusCode();
+        return http;
+    }
+
+    /// <summary>A fresh browser context signed in as the given seeded user through the sign-in page, landed on Book.</summary>
+    public async Task<IPage> SignInAsync(string displayName, string browserZone = "Europe/London")
+    {
+        var context = await Browser.NewContextAsync(new() { BaseURL = BaseUrl, Locale = "en-GB", TimezoneId = browserZone });
         var page = await context.NewPageAsync();
         await page.GotoAsync("/sign-in");
         await page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") }).ClickAsync();

@@ -1,3 +1,4 @@
+using ResourceBooking.Data;
 using Microsoft.Playwright;
 using static Microsoft.Playwright.Assertions;
 
@@ -23,6 +24,8 @@ public class Cuj1BookFromOverviewTests(AppFixture app) : IAsyncLifetime
         await Expect(ana.Locator("[role=status]")).ToContainTextAsync("Booked Thames");
         await ana.Button("Add catering").ClickAsync();
         await Expect(ana.Form().GetByText("Main Kitchen")).ToBeVisibleAsync();
+        await Expect(ana.Form().GetByLabel("Delivery time")).ToHaveValueAsync("14:00");
+        await Expect(ana.Form().GetByLabel("Delivery room")).ToHaveValueAsync(Seed.ThamesId.ToString());
         await ana.FillFieldAsync("Portions", "6");
         await ana.ConfirmAsync();
         await Expect(ana.Locator("[role=status]")).ToContainTextAsync("Ordered from Main Kitchen");
@@ -47,5 +50,24 @@ public class Cuj1BookFromOverviewTests(AppFixture app) : IAsyncLifetime
         await Expect(ben.Form().Locator("[role=alert]")).ToContainTextAsync("Thames is already booked then");
         await ben.Form().Button("Find alternatives").ClickAsync();
         await Expect(ben.Form().Button("Use Severn")).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task A_slow_day_never_replaces_the_day_picked_after_it()
+    {
+        var ana = await app.SignInAsync("Ana");
+        var tomorrow = DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd");
+        await ana.RouteAsync($"**/api/availability?date={tomorrow}*", async route =>
+        {
+            await Task.Delay(1500);
+            await route.ContinueAsync();
+        });
+
+        await ana.Button("Next day").ClickAsync();
+        await ana.Button("Next day").ClickAsync();
+        await ana.WaitForTimeoutAsync(2500);
+
+        // Two days ahead, Ben has Thames from 09:00; tomorrow it is free.
+        await Expect(ana.Cell("Thames", "09:00")).ToHaveAttributeAsync("aria-label", "Thames, 09:00, booked");
     }
 }

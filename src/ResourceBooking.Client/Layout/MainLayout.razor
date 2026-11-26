@@ -10,13 +10,6 @@
             <nav aria-label="Main">
                 <NavLink href="" Match="NavLinkMatch.All">Book</NavLink>
                 <NavLink href="my-bookings">My bookings</NavLink>
-                <AuthorizeView Roles="Admin" Context="admin">
-                    <NavLink href="admin/users">Users</NavLink>
-                    <NavLink href="admin/resources">Resources</NavLink>
-                    <NavLink href="admin/utilisation">Utilisation</NavLink>
-                    <NavLink href="admin/history">History</NavLink>
-                    <NavLink href="admin/traces">Traces</NavLink>
-                </AuthorizeView>
             </nav>
             <div class="user">
                 <NoticesBadge />
@@ -28,6 +21,10 @@
 </header>
 
 <main class="content">
+    @if (signOutFailed)
+    {
+        <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">Signing out didn't work. Try again.</FluentMessageBar></div>
+    }
     @Body
 </main>
 
@@ -40,9 +37,15 @@
 </div>
 
 @code {
+    private bool signOutFailed;
+
     private async Task SignOutAsync()
     {
-        await Api.SignOutAsync();
+        signOutFailed = !(await Api.SignOutAsync()).Ok;
+        if (signOutFailed)
+        {
+            return;
+        }
         AuthState.Refresh();
         Navigation.NavigateTo("sign-in");
     }

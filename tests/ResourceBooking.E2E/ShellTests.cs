@@ -20,6 +20,18 @@ public class ShellTests(AppFixture app) : IAsyncLifetime
         await Assertions.Expect(page.GetByText("London time").First).ToBeVisibleAsync();
     }
 
+    [Fact]
+    public async Task Signing_out_returns_to_sign_in_and_the_session_is_gone()
+    {
+        var page = await app.SignInAsync("Ana");
+
+        await page.Button("Sign out").ClickAsync();
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Sign in" })).ToBeVisibleAsync();
+        await page.GotoAsync("/my-bookings");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Sign in" })).ToBeVisibleAsync();
+    }
+
     [Theory]
     [InlineData("/")]
     [InlineData("/my-bookings")]

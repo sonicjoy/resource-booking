@@ -6,13 +6,13 @@ using ResourceBooking.Shared.Dtos;
 
 namespace ResourceBooking.Client.Services;
 
-/// <summary>A refusal from the API, already in words: Problem Details turned into a message, rule reasons and field errors.</summary>
+/// <summary>
+/// A refusal from the API, already in words: Problem Details turned into one message (each rule's reason for
+/// a rule refusal), the reasons, and any field errors.
+/// </summary>
 public sealed record ApiProblem(int Status, string? Code, string Message, IReadOnlyList<string> Reasons, IReadOnlyDictionary<string, string[]> FieldErrors)
 {
     public static readonly ApiProblem Unreachable = new(0, null, "The server couldn't be reached. Try again.", [], new Dictionary<string, string[]>());
-
-    /// <summary>The message for the bar at the top of a form: each rule's reason, or the message.</summary>
-    public string Summary => Reasons.Count > 0 ? string.Join(" ", Reasons) : Message;
 
     public string? FieldError(string field) => FieldErrors.TryGetValue(field, out var messages) ? string.Join(" ", messages) : null;
 }
@@ -68,7 +68,7 @@ public sealed class ApiClient(HttpClient http)
             }
             return new(await response.Content.ReadFromJsonAsync<T>(), null);
         }
-        catch (HttpRequestException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             return new(default, ApiProblem.Unreachable);
         }
@@ -102,7 +102,7 @@ public sealed class ApiClient(HttpClient http)
                     fields[field.Name] = field.Value.EnumerateArray().Select(x => x.GetString() ?? "").ToArray();
                 }
             }
-            var summary = message ?? (fields.Count > 0 ? "Check the fields marked below." : fallback);
+            var summary = reasons.Count > 0 ? string.Join(" ", reasons) : message ?? (fields.Count > 0 ? "Check the fields marked below." : fallback);
             return new ApiProblem(status, code, summary, reasons, fields);
         }
         catch (JsonException)

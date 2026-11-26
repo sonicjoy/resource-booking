@@ -23,7 +23,7 @@ public static class Pages
     public static async Task OpenTabAsync(this IPage page, string tab) =>
         await page.GetByRole(AriaRole.Tab, new() { Name = tab, Exact = true }).ClickAsync();
 
-    public static ILocator Form(this IPage page) => page.Locator("[role=dialog]");
+    public static ILocator Form(this IPage page) => page.Locator("[role=dialog][aria-labelledby='booking-form-title']");
 
     /// <summary>
     /// Fills a field in the booking form by its label. A Fluent input is a web component with the real

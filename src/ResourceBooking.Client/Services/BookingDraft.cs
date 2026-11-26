@@ -11,6 +11,9 @@ public sealed class BookingDraft
     public required string ResourceName { get; set; }
     public required ResourceType Type { get; set; }
     public DateOnly Date { get; set; }
+
+    /// <summary>The day a booking ends: later than <see cref="Date"/> only for a car held over several days.</summary>
+    public DateOnly EndDate { get; set; }
     public TimeOnly Start { get; set; }
     public TimeOnly End { get; set; }
     public int Attendees { get; set; } = 1;
@@ -21,7 +24,7 @@ public sealed class BookingDraft
 
     public BookingRequest ToRequest() => IsCatering
         ? new BookingRequest { ResourceId = ResourceId, DeliveryAt = Date.ToDateTime(Start), DeliveryRoomId = DeliveryRoomId, Attendees = Attendees, Title = Blank(Title) }
-        : new BookingRequest { ResourceId = ResourceId, Start = Date.ToDateTime(Start), End = Date.ToDateTime(End), Attendees = Attendees, Title = Blank(Title) };
+        : new BookingRequest { ResourceId = ResourceId, Start = Date.ToDateTime(Start), End = EndDate.ToDateTime(End), Attendees = Attendees, Title = Blank(Title) };
 
     public static BookingDraft From(BookingDto booking) => new()
     {
@@ -32,6 +35,7 @@ public sealed class BookingDraft
         Date = DateOnly.FromDateTime(booking.DeliveryAt ?? booking.Start),
         Start = TimeOnly.FromDateTime(booking.DeliveryAt ?? booking.Start),
         End = TimeOnly.FromDateTime(booking.End),
+        EndDate = DateOnly.FromDateTime(booking.DeliveryAt ?? booking.End),
         Attendees = booking.Attendees,
         Title = booking.Title,
         DeliveryRoomId = booking.DeliveryRoomId,

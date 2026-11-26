@@ -1,94 +1,94 @@
 @inject ApiClient Api
 
 @* The booking form as a modal dialog: a new booking, a catering order, or an edit of either. *@
-<div class="backdrop">
-    <div class="booking-form" role="dialog" aria-modal="true" aria-labelledby="booking-form-title">
-        <h2 id="booking-form-title">@Heading</h2>
+<Modal Id="booking-form" Title="@Heading" Class="booking-form">
+    @if (problem is not null)
+    {
+        <div role="alert" class="form-problem">
+            <FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@problem.Message</FluentMessageBar>
+            @if (problem.Code == ApiCodes.Overlap && Draft.BookingId is null)
+            {
+                <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="FindAlternativesAsync">Find alternatives</FluentButton>
+            }
+        </div>
+    }
+    @if (alternatives is not null)
+    {
+        <div class="alternatives">
+            @if (alternatives.Count == 0)
+            {
+                <p>Nothing else of this kind is free then.</p>
+            }
+            @foreach (var option in alternatives)
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="() => Use(option)">Use @option.Name</FluentButton>
+            }
+        </div>
+    }
 
-        @if (problem is not null)
+    <EditForm Model="Draft" OnSubmit="SubmitAsync">
+        <p class="resource"><span class="label">@(Draft.IsCatering ? "Kitchen" : "Resource")</span> @Draft.ResourceName</p>
+
+        <label class="field">
+            <span>Date</span>
+            <input type="date" value="@Draft.Date.ToString("yyyy-MM-dd")" @onchange="DateChanged" />
+        </label>
+
+        @if (Draft.IsCatering)
         {
-            <div role="alert" class="form-problem">
-                <FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@problem.Summary</FluentMessageBar>
-                @if (problem.Code == "OVERLAP")
-                {
-                    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="FindAlternativesAsync">Find alternatives</FluentButton>
-                }
-            </div>
-        }
-        @if (alternatives is not null)
-        {
-            <div class="alternatives">
-                @if (alternatives.Count == 0)
-                {
-                    <p>Nothing else of this kind is free then.</p>
-                }
-                @foreach (var option in alternatives)
-                {
-                    <FluentButton Appearance="ButtonAppearance.Outline" OnClick="() => Use(option)">Use @option.Name</FluentButton>
-                }
-            </div>
-        }
-
-        <EditForm Model="Draft" OnSubmit="SubmitAsync">
-            <p class="resource"><span class="label">@(Draft.IsCatering ? "Kitchen" : "Resource")</span> @Draft.ResourceName</p>
-
             <label class="field">
-                <span>Date</span>
-                <input type="date" @bind="Draft.Date" />
+                <span>Delivery time</span>
+                <input type="time" step="1800" @bind="Draft.Start" />
             </label>
-
-            @if (Draft.IsCatering)
+            <FieldError Problem="problem" Field="DeliveryAt" />
+            <FluentNumberInput TValue="int" Label="Portions" @bind-Value="Draft.Attendees" Min="1" />
+            <FieldError Problem="problem" Field="Attendees" />
+            <label class="field">
+                <span>Delivery room</span>
+                <select @bind="DeliveryRoom">
+                    <option value="">Choose a room</option>
+                    @foreach (var room in rooms)
+                    {
+                        <option value="@room.Id">@room.Name</option>
+                    }
+                </select>
+            </label>
+            <FieldError Problem="problem" Field="DeliveryRoomId" />
+        }
+        else
+        {
+            <label class="field">
+                <span>Start</span>
+                <input type="time" step="1800" @bind="Draft.Start" />
+            </label>
+            <FieldError Problem="problem" Field="Start" />
+            @if (Draft.Type == ResourceType.Car)
             {
                 <label class="field">
-                    <span>Delivery time</span>
-                    <input type="time" step="1800" @bind="Draft.Start" />
+                    <span>End date</span>
+                    <input type="date" @bind="Draft.EndDate" />
                 </label>
-                <FieldError Problem="problem" Field="DeliveryAt" />
-                <FluentNumberInput TValue="int" Label="Portions" @bind-Value="Draft.Attendees" Min="1" />
-                <FieldError Problem="problem" Field="Attendees" />
-                <label class="field">
-                    <span>Delivery room</span>
-                    <select @bind="DeliveryRoom">
-                        <option value="">Choose a room</option>
-                        @foreach (var room in Rooms)
-                        {
-                            <option value="@room.Id">@room.Name</option>
-                        }
-                    </select>
-                </label>
-                <FieldError Problem="problem" Field="DeliveryRoomId" />
             }
-            else
-            {
-                <label class="field">
-                    <span>Start</span>
-                    <input type="time" step="1800" @bind="Draft.Start" />
-                </label>
-                <FieldError Problem="problem" Field="Start" />
-                <label class="field">
-                    <span>End</span>
-                    <input type="time" step="1800" @bind="Draft.End" />
-                </label>
-                <FieldError Problem="problem" Field="End" />
-                <FluentNumberInput TValue="int" Label="Attendees" @bind-Value="Draft.Attendees" Min="1" />
-                <FieldError Problem="problem" Field="Attendees" />
-            }
-            <FluentTextInput Label="Title" @bind-Value="Draft.Title" Placeholder="Optional" MaxLength="100" />
-            <p class="hint">London time</p>
+            <label class="field">
+                <span>End</span>
+                <input type="time" step="1800" @bind="Draft.End" />
+            </label>
+            <FieldError Problem="problem" Field="End" />
+            <FluentNumberInput TValue="int" Label="Attendees" @bind-Value="Draft.Attendees" Min="1" />
+            <FieldError Problem="problem" Field="Attendees" />
+        }
+        <FluentTextInput Label="Title" @bind-Value="Draft.Title" Placeholder="Optional" MaxLength="100" />
+        <p class="hint">London time</p>
 
-            <div class="actions">
-                <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary" Loading="saving">Confirm</FluentButton>
-                <FluentButton Appearance="ButtonAppearance.Default" OnClick="OnCancel">Cancel</FluentButton>
-            </div>
-        </EditForm>
-    </div>
-</div>
+        <div class="actions">
+            <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary" Loading="saving">Confirm</FluentButton>
+            <FluentButton Appearance="ButtonAppearance.Default" OnClick="OnCancel">Cancel</FluentButton>
+        </div>
+    </EditForm>
+</Modal>
 
 @code {
     [Parameter, EditorRequired] public BookingDraft Draft { get; set; } = null!;
-
-    /// <summary>Active meeting rooms, for a catering order's delivery room.</summary>
-    [Parameter] public IReadOnlyList<ResourceDto> Rooms { get; set; } = [];
 
     [Parameter] public EventCallback<BookingDto> OnSaved { get; set; }
 
@@ -96,6 +96,7 @@
 
     private ApiProblem? problem;
     private List<ResourceDto>? alternatives;
+    private List<ResourceDto> rooms = [];
     private bool saving;
 
     private string Heading => (Draft.BookingId, Draft.IsCatering) switch
@@ -111,24 +112,56 @@
         set => Draft.DeliveryRoomId = Guid.TryParse(value, out var id) ? id : null;
     }
 
+    /// <summary>A catering order needs the active meeting rooms for its delivery room.</summary>
+    protected override async Task OnInitializedAsync()
+    {
+        if (Draft.IsCatering)
+        {
+            var result = await Api.ResourcesAsync();
+            problem = result.Problem;
+            rooms = result.Value?.Where(r => r.Type == ResourceType.MeetingRoom).OrderBy(r => r.Name).ToList() ?? [];
+        }
+    }
+
     private async Task SubmitAsync()
     {
         saving = true;
         alternatives = null;
-        var request = Draft.ToRequest();
-        var result = Draft.BookingId is { } id ? await Api.UpdateAsync(id, request) : await Api.CreateAsync(request);
-        saving = false;
-        problem = result.Problem;
-        if (result.Ok)
+        try
         {
-            await OnSaved.InvokeAsync(result.Value);
+            var request = Draft.ToRequest();
+            var result = Draft.BookingId is { } id ? await Api.UpdateAsync(id, request) : await Api.CreateAsync(request);
+            problem = result.Problem;
+            if (result.Ok)
+            {
+                await OnSaved.InvokeAsync(result.Value);
+            }
+        }
+        finally
+        {
+            saving = false;
         }
     }
 
     private async Task FindAlternativesAsync()
     {
-        var result = await Api.FreeAsync(Draft.Type, Draft.Date.ToDateTime(Draft.Start), Draft.Date.ToDateTime(Draft.End), Draft.Attendees);
-        alternatives = result.Value?.Where(r => r.Id != Draft.ResourceId).ToList() ?? [];
+        var result = await Api.FreeAsync(Draft.Type, Draft.Date.ToDateTime(Draft.Start), Draft.EndDate.ToDateTime(Draft.End), Draft.Attendees);
+        if (result.Problem is { } failed)
+        {
+            problem = failed;
+            return;
+        }
+        alternatives = result.Value!.Where(r => r.Id != Draft.ResourceId).ToList();
+    }
+
+    /// <summary>Moving the start day moves a one-day booking's end with it, and keeps a longer one's length.</summary>
+    private void DateChanged(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var day))
+        {
+            Draft.EndDate = Draft.EndDate.AddDays(day.DayNumber - Draft.Date.DayNumber);
+            Draft.Date = day;
+        }
     }
 
     private void Use(ResourceDto option)
