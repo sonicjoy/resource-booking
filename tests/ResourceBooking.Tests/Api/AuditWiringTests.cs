@@ -33,6 +33,8 @@ public class AuditWiringTests(DbFixture fixture) : IAsyncLifetime
         (await admin.PostAsync("/api/admin/reseed", null, Ct)).EnsureSuccessStatusCode();
 
         await using var db = _app.Db();
-        Assert.All(await db.AuditEvents.ToListAsync(Ct), e => Assert.Equal(Seed.SamId, e.ActorId));
+        var events = await db.AuditEvents.ToListAsync(Ct);
+        Assert.Equal(3 + 4 + 9, events.Count);
+        Assert.All(events, e => Assert.Equal(Seed.SamId, e.ActorId));
     }
 }
