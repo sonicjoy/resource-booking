@@ -48,3 +48,10 @@ public sealed record ResourceDto(
     int? MaxFuturePerUser);
 
 public sealed record NoticeDto(Guid Id, Guid BookingId, string Message, DateTime CreatedAt, bool Read);
+
+/// <summary>One calendar day of the month view: summed used and available amounts across a type's resources
+/// (hours for rooms and cars, orders for kitchens). <see cref="Share"/> is null when nothing is open.</summary>
+public sealed record DayShare(DateOnly Date, double Used, double Available, double? Share);
+
+/// <summary>The month view for one type (design: month-view §3). Totals only, the same for every caller.</summary>
+public sealed record MonthOccupancy(int Year, int Month, ResourceType Type, IReadOnlyList<DayShare> Days);
