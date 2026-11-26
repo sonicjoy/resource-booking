@@ -63,7 +63,7 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapHealthEndpoints();
 
-// Every /api endpoint requires a signed-in user unless it opts out with AllowAnonymous.
+// Every /api endpoint requires a signed-in user unless it opts out with AllowAnonymous,
 // and refuses a state-changing request from another site.
 var api = app.MapGroup("/api").RequireAuthorization().RequireSameOrigin();
 api.MapAuthEndpoints();

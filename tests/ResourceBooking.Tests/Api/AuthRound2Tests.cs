@@ -7,7 +7,7 @@ using ResourceBooking.Tests.Infrastructure;
 
 namespace ResourceBooking.Tests.Api;
 
-/// <summary>Second-round fixes: configurable reseed window, 429 shape, proxy hosts, strict enum names.</summary>
+/// <summary>Second-round fixes: configurable reseed window, 429 shape, strict enum names.</summary>
 public class AuthRound2Tests(DbFixture fixture) : IAsyncLifetime
 {
     private ApiFactory _app = null!;
@@ -41,19 +41,6 @@ public class AuthRound2Tests(DbFixture fixture) : IAsyncLifetime
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Ct)).RootElement;
         Assert.Equal("RATE_LIMITED", body.GetProperty("code").GetString());
         Assert.False(string.IsNullOrEmpty(body.GetProperty("message").GetString()));
-    }
-
-    [Fact]
-    public async Task A_post_from_the_public_host_is_allowed_when_the_proxy_rewrites_host()
-    {
-        var admin = await _app.SignedInAsync(Seed.SamId);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/admin/reseed");
-        request.Headers.Add("Origin", "https://app.example.test");
-        request.Headers.Add("X-Forwarded-Host", "app.example.test");
-
-        var response = await admin.SendAsync(request, Ct);
-
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
     [Fact]

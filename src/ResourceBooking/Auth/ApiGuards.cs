@@ -44,8 +44,7 @@ public static class ApiGuards
     /// <summary>
     /// Refuses a state-changing /api request whose Origin is another site. SameSite=Strict already keeps
     /// the cookie off such requests; this also covers sign-in, which needs no cookie. A request with no
-    /// Origin (curl, server-to-server) is allowed. The Origin may match the Host, or the X-Forwarded-Host
-    /// a proxy sets: a cross-site page cannot add that header, so trusting it does not reopen the hole.
+    /// Origin (curl, server-to-server) is allowed.
     /// </summary>
     public static RouteGroupBuilder RequireSameOrigin(this RouteGroupBuilder group) =>
         group.AddEndpointFilter(async (context, next) =>
@@ -61,12 +60,7 @@ public static class ApiGuards
 
     private static bool IsOwnHost(string origin, HttpRequest request)
     {
-        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-        {
-            return false;
-        }
-        var forwardedHost = request.Headers["X-Forwarded-Host"].ToString();
-        return string.Equals(uri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase)
-            || (forwardedHost.Length > 0 && string.Equals(uri.Authority, forwardedHost, StringComparison.OrdinalIgnoreCase));
+        return Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+            && string.Equals(uri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase);
     }
 }
