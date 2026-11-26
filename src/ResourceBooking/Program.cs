@@ -17,7 +17,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddDbContext<AppDb>(options =>
     AppDb.Configure(options, builder.Configuration.GetConnectionString("Db")));
 
-builder.Services.AddAppAuthentication();
+builder.Services.AddAppAuthentication(builder.Environment);
+builder.Services.AddApiGuards();
 builder.Services.AddProblemDetails();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -51,17 +52,22 @@ else
     app.UseHsts();
 }
 
-// Pages get the not-found page; API calls keep their status code and Problem Details body.
+// Pages get the not-found page; API calls keep their own status code.
 app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"), pages =>
     pages.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
+app.UseSameOriginForApi();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapHealthEndpoints();
-app.MapAuthEndpoints();
-app.MapAdminEndpoints();
+
+// Every /api endpoint requires a signed-in user unless it opts out with AllowAnonymous.
+var api = app.MapGroup("/api").RequireAuthorization();
+api.MapAuthEndpoints();
+api.MapAdminEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
     .AddAdditionalAssemblies(typeof(ResourceBooking.Client._Imports).Assembly);

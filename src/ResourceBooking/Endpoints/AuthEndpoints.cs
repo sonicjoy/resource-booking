@@ -10,16 +10,17 @@ namespace ResourceBooking.Endpoints;
 /// <summary>Mock SSO: pick an active user and get a session cookie.</summary>
 public static class AuthEndpoints
 {
-    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
+    public static RouteGroupBuilder MapAuthEndpoints(this RouteGroupBuilder api)
     {
-        var auth = app.MapGroup("/api/auth");
+        var auth = api.MapGroup("/auth");
 
         auth.MapGet("/sign-in-options", async (AppDb db, CancellationToken ct) =>
             await db.Users.AsNoTracking()
                 .Where(u => u.IsActive)
                 .OrderBy(u => u.DisplayName)
                 .Select(u => new SignInOption(u.Id, u.DisplayName, u.Email, u.Role))
-                .ToListAsync(ct));
+                .ToListAsync(ct))
+            .AllowAnonymous();
 
         auth.MapPost("/sign-in", async (SignInRequest request, AppDb db, HttpContext http, CancellationToken ct) =>
         {
@@ -30,13 +31,13 @@ public static class AuthEndpoints
             }
             await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, CookieSetup.PrincipalFor(user));
             return Results.Ok(new CurrentUser(user.Id, user.DisplayName, user.Email, user.Role));
-        });
+        }).AllowAnonymous();
 
         auth.MapPost("/sign-out", async (HttpContext http) =>
         {
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return Results.NoContent();
-        });
+        }).AllowAnonymous();
 
         auth.MapGet("/me", async (HttpContext http, AppDb db, CancellationToken ct) =>
         {
@@ -46,8 +47,8 @@ public static class AuthEndpoints
                 .Select(u => new CurrentUser(u.Id, u.DisplayName, u.Email, u.Role))
                 .SingleOrDefaultAsync(ct);
             return me is null ? Results.Unauthorized() : Results.Ok(me);
-        }).RequireAuthorization();
+        });
 
-        return app;
+        return api;
     }
 }

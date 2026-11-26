@@ -17,7 +17,7 @@ public static class CookieSetup
 {
     public const string AdminPolicy = "Admin";
 
-    public static IServiceCollection AddAppAuthentication(this IServiceCollection services)
+    public static IServiceCollection AddAppAuthentication(this IServiceCollection services, IHostEnvironment environment)
     {
         services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(options =>
@@ -25,7 +25,8 @@ public static class CookieSetup
                 options.Cookie.Name = "rb_session";
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Strict;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                // Plain HTTP is allowed only in development; the deployed app always marks it Secure.
+                options.Cookie.SecurePolicy = environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
                 options.ExpireTimeSpan = TimeSpan.FromHours(8);
                 options.SlidingExpiration = true;
 
@@ -51,9 +52,6 @@ public static class CookieSetup
         ],
         CookieAuthenticationDefaults.AuthenticationScheme));
 
-    public static Guid? UserId(this ClaimsPrincipal principal) =>
-        Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
-
     private static async Task ValidateAsync(CookieValidatePrincipalContext context)
     {
         // Static files and pages need no user; only API requests pay for the lookup.
@@ -64,7 +62,7 @@ public static class CookieSetup
 
         var db = context.HttpContext.RequestServices.GetRequiredService<AppDb>();
         var userId = principal.UserId();
-        var user = userId is null ? null : await db.Users.AsNoTracking()
+        var user = await db.Users.AsNoTracking()
             .Where(u => u.Id == userId)
             .Select(u => new { u.IsActive, u.Role })
             .SingleOrDefaultAsync(context.HttpContext.RequestAborted);

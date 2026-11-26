@@ -159,7 +159,6 @@ public class AuthTests(DbFixture fixture) : IAsyncLifetime
     {
         await using var summer = await ApiFactory.CreateAsync(fixture, new DateTimeOffset(2026, 7, 8, 8, 0, 0, TimeSpan.Zero));
 
-        summer.Client().Dispose();
 
         await using var db = summer.Db();
         var nineLondonTomorrow = new DateTimeOffset(2026, 7, 9, 8, 0, 0, TimeSpan.Zero);

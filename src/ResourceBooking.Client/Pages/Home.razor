@@ -16,10 +16,18 @@
     </NotAuthorized>
 </AuthorizeView>
 
+@if (signOutFailed)
+{
+    <p role="alert">Signing out didn't work. Try again.</p>
+}
+
 @code {
+    private bool signOutFailed;
+
     private async Task SignOutAsync()
     {
-        await Http.PostAsync("api/auth/sign-out", null);
+        var response = await Http.PostAsync("api/auth/sign-out", null);
+        signOutFailed = !response.IsSuccessStatusCode;
         AuthState.Refresh();
     }
 }

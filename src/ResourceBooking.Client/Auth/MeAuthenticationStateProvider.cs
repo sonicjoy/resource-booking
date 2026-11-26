@@ -14,8 +14,18 @@ public sealed class MeAuthenticationStateProvider(HttpClient http) : Authenticat
 
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        using var response = await http.GetAsync("api/auth/me");
-        if (!response.IsSuccessStatusCode || await response.Content.ReadFromJsonAsync<CurrentUser>() is not { } me)
+        CurrentUser? me;
+        try
+        {
+            using var response = await http.GetAsync("api/auth/me");
+            me = response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<CurrentUser>() : null;
+        }
+        catch (HttpRequestException)
+        {
+            // Server unreachable: show the app as signed out rather than crash.
+            me = null;
+        }
+        if (me is null)
         {
             return SignedOut;
         }

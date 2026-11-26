@@ -14,7 +14,7 @@
 }
 else
 {
-    @foreach (var group in options.GroupBy(o => o.Role).OrderByDescending(g => g.Key))
+    @foreach (var group in options.GroupBy(o => o.Role).OrderBy(g => g.Key == Role.Admin ? 0 : 1))
     {
         <h2>@(group.Key == Role.Admin ? "Admins" : "Employees")</h2>
         <ul class="people">
@@ -47,7 +47,9 @@ else
         var response = await Http.PostAsJsonAsync("api/auth/sign-in", new SignInRequest(userId));
         if (!response.IsSuccessStatusCode)
         {
-            error = "That person can no longer sign in.";
+            error = response.StatusCode == System.Net.HttpStatusCode.NotFound
+                ? "That person can no longer sign in."
+                : "Signing in didn't work. Try again.";
             return;
         }
         AuthState.Refresh();
