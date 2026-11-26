@@ -86,36 +86,75 @@ public sealed class AppFixture : IAsyncLifetime
         var page = await context.NewPageAsync();
         await page.GotoAsync("/sign-in");
         var user = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") });
-        await WaitForSignInListAsync(page, user);
+        await WaitForSignInListAsync(page, user, displayName);
         await user.ClickAsync();
         await page.GetByRole(AriaRole.Heading, new() { Name = "Book" }).WaitForAsync();
         return page;
     }
 
     /// <summary>
-    /// Waits for the sign-in list, which appears only once the WebAssembly app has downloaded and asked the server for
-    /// it. A fresh browser context downloads the app again, and twice in CI that took over 30 s, so this allows longer,
-    /// reloads once, and if the list still isn't there fails with what the page did show.
+    /// Waits for the sign-in list in three steps, so a failure says which one broke. Prerendering is off, so the
+    /// "Sign in" heading appears only once the WebAssembly app has started; a fresh browser context downloads it
+    /// again, and CI twice timed out here (suspected slow start, not confirmed). That step allows 45 s and reloads
+    /// once, writing the reload to the test output so a rescued sign-in leaves a trace. Then the list or the page's
+    /// own error, then the named user.
     /// </summary>
-    private static async Task WaitForSignInListAsync(IPage page, ILocator user)
+    private static async Task WaitForSignInListAsync(IPage page, ILocator user, string displayName)
     {
+        var started = page.GetByRole(AriaRole.Heading, new() { Name = "Sign in", Level = 1 });
         try
         {
-            await user.WaitForAsync(new() { Timeout = 45_000 });
-            return;
+            await started.WaitForAsync(new() { Timeout = 45_000 });
         }
         catch (TimeoutException)
         {
-            await page.ReloadAsync();
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"Sign-in page hadn't started after 45 s at {page.Url}; reloading once. The page showed: {await ShownAsync(page)}");
+            try
+            {
+                await page.ReloadAsync();
+                await started.WaitForAsync(new() { Timeout = 45_000 });
+            }
+            catch (TimeoutException e)
+            {
+                throw new TimeoutException($"The app never started on the sign-in page, even after a reload. The page showed: {await ShownAsync(page)}", e);
+            }
         }
+
+        var alert = page.Locator("[role=alert]");
         try
         {
-            await user.WaitForAsync(new() { Timeout = 45_000 });
+            await page.Locator("ul.people button, [role=alert]").First.WaitForAsync(new() { Timeout = 30_000 });
         }
         catch (TimeoutException e)
         {
-            var shown = await page.Locator("body").InnerTextAsync();
-            throw new TimeoutException($"The sign-in list never appeared, even after a reload. The page showed: {shown[..Math.Min(shown.Length, 500)]}", e);
+            throw new TimeoutException($"The app started but the sign-in list never arrived. The page showed: {await ShownAsync(page)}", e);
+        }
+        if (await alert.CountAsync() > 0)
+        {
+            throw new InvalidOperationException($"The sign-in list failed to load: {await alert.First.InnerTextAsync()}");
+        }
+
+        try
+        {
+            await user.WaitForAsync(new() { Timeout = 5_000 });
+        }
+        catch (TimeoutException e)
+        {
+            throw new InvalidOperationException($"No sign-in button for {displayName}. The list shows: {await ShownAsync(page)}", e);
+        }
+    }
+
+    private static async Task<string> ShownAsync(IPage page)
+    {
+        try
+        {
+            var text = await page.Locator("body").InnerTextAsync(new() { Timeout = 5_000 });
+            return text.Length > 500 ? text[..500] : text;
+        }
+        catch (PlaywrightException e)
+        {
+            return $"(couldn't read the page: {e.Message})";
         }
     }
 
