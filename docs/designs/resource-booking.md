@@ -179,12 +179,12 @@ Tables use snake_case (EFCore.NamingConventions). Enums are stored as text. Ids 
 
 * `resourceId`
 * `start` and `end`
-* `attendees`
-* `title` (optional)
+* `attendees`, 1 to 1000 (portions for a catering order)
+* `title` (optional), at most 100 characters
 * `deliveryAt` and `deliveryRoomId` (catering only)
 * `proposalId` (optional)
 
-For a catering order, the server takes the day from `deliveryAt` and ignores `start` and `end`. It sets the booking's range to that local day, midnight to midnight. A request whose shape doesn't match the resource returns 400: a delivery time for a room or car, or no delivery time for a kitchen. So does a time sent with an offset (it must be company-local). `deliveryRoomId` must be an active meeting room. Cancelling or retiring that room does not cancel orders delivered to it; this gap is accepted.
+A room or car booking needs `start` and `end`, with the end after the start; a catering order needs `deliveryAt` instead. A request that breaks any of these is a 400 listing every field it refuses, not only the first. For a catering order, the server takes the day from `deliveryAt` and ignores `start` and `end`. It sets the booking's range to that local day, midnight to midnight. A request whose shape doesn't match the resource returns 400: a delivery time for a room or car, or no delivery time for a kitchen. So does a time sent with an offset (it must be company-local). `deliveryRoomId` must be an active meeting room. Cancelling or retiring that room does not cancel orders delivered to it; this gap is accepted.
 
 ### Rules
 
@@ -466,12 +466,12 @@ Steps 2 to 10 write their tests first and run them failing.
      * Proposal links: wrong owner, not `Open`, expired and wrong kind each book unlinked; `changed_before_confirm` is set.
      * An employee's availability shows no other owner or title.
      * Every write path leaves its audit row.
-7. **Employee screens and journeys.**
+7. **Employee screens and journeys.** Test tier `basic`: UI and wiring.
    * **Client:** `Client/Services/ApiClient.cs`, which maps Problem Details to messages; `Client/Pages/Overview.razor` and `Overview.razor.css`; `MyBookings.razor`; `Client/Components/BookingForm.razor` and `NoticesBadge.razor`.
    * **Fixture:** `E2E/AppFixture.cs`. The app runs on Kestrel with a Testcontainers database and the real clock. All end-to-end classes share one collection that does not run in parallel, and each class reseeds first.
    * **Tests:** `E2E/Cuj1BookFromOverviewTests.cs` and `Cuj2RuleRefusalTests.cs`.
    * **Then:** check that the Kestrel fixture serves the client and that Playwright can type into Fluent inputs.
-8. **Admin API.**
+8. **Admin API.** Test tier `high`: permissions, audit and data changes; its locks (LAST_ADMIN, cascade row locks, retirement) `critical`: concurrency.
    * **Endpoints:** `Server/Endpoints/UserEndpoints.cs` (list, by id, `POST`, `PUT`, deactivation); `ResourceEndpoints.cs` (`POST`, `PUT`, retirement); `ReportEndpoints.cs` (utilisation, history).
    * **Admin tests:** `Tests/Api/AdminApiTests.cs`:
      * Retirement: `IN_USE`, `LAST_DAY_PAST`, the cascade, notices, and the race with a concurrent booking.
@@ -479,11 +479,11 @@ Steps 2 to 10 write their tests first and run them failing.
      * `UNITS_IN_USE`.
      * `PUT` cannot change `type`, `last_day` or `is_active`.
    * **Utilisation tests:** `UtilisationTests.cs`. Ratios for a multi-day car, null opening hours, a retired resource, and kitchen unit-days.
-9. **Admin screens and journeys, then the gate.**
+9. **Admin screens and journeys, then the gate.** Test tier `basic`: UI and wiring.
    * **Client:** `Client/Pages/Admin/Users.razor`, `Resources.razor`, `Utilisation.razor` and `History.razor`.
    * **Tests:** `E2E/Cuj3AdminSetupTests.cs`, `Cuj4RetireAndDeactivateTests.cs` and `Cuj5UtilisationAndHistoryTests.cs`.
    * **Gate:** step 10 starts only when CI is green and CUJ 1 passes against the deployed URL.
-10. **Assistant.**
+10. **Assistant.** Test tier `standard`: tool calls go through validated rules; the global token budget cap `high`: a safety limit on spend.
     * **Server:** `Server/Assistant/AssistantService.cs`, `TracingChatClient.cs`, `ToolTracing.cs`, `AssistantTools.cs` and `TokenBudget.cs`; `Server/Endpoints/AssistantEndpoints.cs`.
     * **Client:** `Client/Components/AssistantPanel.razor` and `Client/Pages/Admin/Traces.razor`.
     * **Evals:** `evals/cases.json`, copied to the test output by `Tests/ResourceBooking.Tests.csproj` (M).
@@ -498,7 +498,7 @@ Steps 2 to 10 write their tests first and run them failing.
       * Every trace step kind is written.
     * **Eval tests:** `EvalTests.cs`, with `[Trait("Category","Eval")]`.
     * **End to end:** `E2E/Cuj6AssistantTests.cs`, on the stub.
-11. **Docs.** `README.md`: how to run it locally, what is mocked, known limits, and how AI tools were used. It links to this design.
+11. **Docs.** No tests. `README.md`: how to run it locally, what is mocked, known limits, and how AI tools were used. It links to this design.
 
 **If time runs short,** cut in this order. Items 5 to 7 are the ones that can be cut before the gate.
 
