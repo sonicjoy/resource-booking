@@ -24,6 +24,18 @@ public sealed class StubChatClient : IChatClient
     /// <summary>How each response reports its token usage: in full, without a total, or not at all.</summary>
     public UsageReport Usage { get; set; }
 
+    /// <summary>The final reply is split here into separate messages, as the Responses API can return it.</summary>
+    public const string SplitReply = "|";
+
+    /// <summary>Answers with a refusal instead of the scripted reply.</summary>
+    public string? Refusal { get; set; }
+
+    /// <summary>Text the model writes alongside its tool calls, before the final reply.</summary>
+    public string? Preamble { get; set; }
+
+    /// <summary>The finish reason of each final reply, to test a reply cut off at the output cap.</summary>
+    public ChatFinishReason? FinishReason { get; set; }
+
     /// <summary>Asks for the scripted tool calls on every call, never replying, to test the loop cap.</summary>
     public bool NeverReply { get; set; }
 
@@ -73,11 +85,18 @@ public sealed class StubChatClient : IChatClient
         var sinceUser = list.SkipWhile(m => m != list.Last(x => x.Role == ChatRole.User)).Skip(1);
         if (script.Calls.Count == 0 || (!NeverReply && sinceUser.Any(m => m.Contents.OfType<FunctionResultContent>().Any())))
         {
-            return new ChatResponse(new ChatMessage(ChatRole.Assistant, script.Reply)) { Usage = usage };
+            List<ChatMessage> final = Refusal is { } refusal
+                ? [new ChatMessage(ChatRole.Assistant, [new ErrorContent(refusal)])]
+                : [.. script.Reply.Split(SplitReply).Select(part => new ChatMessage(ChatRole.Assistant, part))];
+            return new ChatResponse(final) { Usage = usage, FinishReason = FinishReason };
         }
 
         var contents = script.Calls.Select((c, i) => (AIContent)new FunctionCallContent($"call{Calls.Count}_{i}", c.Name,
             JsonSerializer.Deserialize<Dictionary<string, object?>>(JsonSerializer.Serialize(c.Arguments, JsonSerializerOptions.Web)))).ToList();
+        if (Preamble is { } preamble)
+        {
+            contents.Insert(0, new TextContent(preamble));
+        }
         return new ChatResponse(new ChatMessage(ChatRole.Assistant, contents)) { Usage = usage };
     }
 

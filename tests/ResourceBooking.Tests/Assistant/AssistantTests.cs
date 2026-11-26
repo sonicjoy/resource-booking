@@ -396,10 +396,10 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         var text = new string('é', 1000);
         await ReplyAsync(await ana.PostAsJsonAsync("/api/assistant/messages", new { text }, Ct));
 
-        // The reservation is kept, since nothing reported the real usage: the output cap (800) plus at least the
+        // The reservation is kept, since nothing reported the real usage: the output cap (4000) plus at least the
         // message's UTF-8 bytes (2 per é) as its input bound.
         await using var db = app.Db();
-        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 800 + 2000);
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 4000 + 2000);
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
 
         await ReplyAsync(await SayAsync(ana, "hello"));
 
-        Assert.Equal(800, _app.Model.Options.Single()?.MaxOutputTokens);
+        Assert.Equal(4000, _app.Model.Options.Single()?.MaxOutputTokens);
     }
 
     [Fact]
@@ -443,6 +443,229 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
         Assert.Contains("Severn", payload);
         Assert.DoesNotContain("Thames", payload);
+    }
+
+    [Fact]
+    public async Task A_room_proposal_with_a_blank_delivery_time_is_still_a_room_proposal()
+    {
+        _app.Model.On("a room", "Here.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees = 6, deliveryAt = "" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "a room for 6 tomorrow at 2pm"));
+
+        Assert.Equal(Seed.ThamesId, Assert.Single(reply.Proposals).Request!.ResourceId);
+    }
+
+    [Fact]
+    public async Task A_reply_cut_off_at_the_output_cap_says_the_assistant_could_not_answer()
+    {
+        _app.Model.On("hello", "");
+        _app.Model.FinishReason = ChatFinishReason.Length;
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
+    }
+
+    [Theory]
+    [InlineData("length")]
+    [InlineData("content_filter")]
+    public async Task A_reply_that_stops_without_an_answer_after_a_tool_preamble_says_the_assistant_could_not_answer(string finish)
+    {
+        _app.Model.On("my bookings", "", Call("get_my_bookings", new { }));
+        _app.Model.Preamble = "Let me look.";
+        _app.Model.FinishReason = new ChatFinishReason(finish);
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "my bookings?"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
+    }
+
+    [Fact]
+    public async Task A_final_answer_in_two_messages_is_shown_whole_without_the_tool_rounds_preamble()
+    {
+        _app.Model.On("my bookings", "Part one.|Part two.", Call("get_my_bookings", new { }));
+        _app.Model.Preamble = "Let me look.";
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "my bookings?"));
+
+        Assert.Equal("Part one.\nPart two.", reply.Text);
+    }
+
+    [Fact]
+    public async Task A_model_refusal_says_the_assistant_could_not_answer()
+    {
+        _app.Model.Refusal = "I can't help with that.";
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.Unavailable, reply.Text);
+    }
+
+    [Fact]
+    public async Task A_blank_answer_that_finished_normally_says_done()
+    {
+        // The Responses API reports no finish reason for a completed reply.
+        _app.Model.On("hello", "");
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal("Done.", reply.Text);
+    }
+
+    [Fact]
+    public async Task A_blank_title_on_a_change_keeps_the_bookings_title()
+    {
+        Guid severn;
+        await using (var db = _app.Db())
+        {
+            severn = await db.Bookings.Where(b => b.UserId == Seed.AnaId && b.ResourceId == Seed.SevernId).Select(b => b.Id).SingleAsync(Ct);
+        }
+        _app.Model.On("move", "Moved.", Call("propose_change", new { bookingId = severn, start = "2026-11-28T14:00", end = "2026-11-28T15:00", title = "" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "move my Severn booking to 2pm"));
+
+        Assert.Equal("Quarterly review", Assert.Single(reply.Proposals).Request!.Title);
+    }
+
+    private async Task AddKitchenAsync(string name, DateOnly? lastDay)
+    {
+        await using var db = _app.Db();
+        db.Resources.Add(new Resource
+        {
+            Id = Guid.CreateVersion7(),
+            Name = name,
+            Type = ResourceType.Catering,
+            Capacity = 20,
+            Units = 2,
+            OpensAt = new TimeOnly(8, 0),
+            ClosesAt = new TimeOnly(16, 0),
+            MaxDaysAhead = 90,
+            LastDay = lastDay,
+        });
+        await db.SaveChangesAsync(Ct);
+    }
+
+    private async Task<string> RefusalForCateringAgainstARoomAsync()
+    {
+        _app.Model.On("lunch", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, deliveryAt = $"{Tomorrow}T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        await ReplyAsync(await SayAsync(ana, "lunch for 8 in Thames at 12:30 tomorrow"));
+        await using var db = _app.Db();
+        return (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(-1, false)]
+    public async Task A_kitchen_is_listed_through_its_last_day_and_not_after(int lastDayFromDelivery, bool listed)
+    {
+        await AddKitchenAsync("North Kitchen", new DateOnly(2026, 11, 26).AddDays(lastDayFromDelivery));
+
+        var payload = await RefusalForCateringAgainstARoomAsync();
+
+        Assert.Equal(listed, payload.Contains("North Kitchen", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_refusal_lists_at_most_10_kitchens_and_says_how_many_more()
+    {
+        for (var i = 1; i <= 11; i++)
+        {
+            await AddKitchenAsync($"Kitchen {i:00}", null);
+        }
+
+        var payload = await RefusalForCateringAgainstARoomAsync();
+
+        // Main Kitchen plus 11 more: 10 listed by name, 2 left over.
+        Assert.Contains("and 2 more", payload);
+        Assert.Equal(10, System.Text.RegularExpressions.Regex.Matches(payload, "Kitchen[^,(]*\\(").Count);
+    }
+
+    [Fact]
+    public async Task The_kitchens_listed_in_a_refusal_include_one_retiring_after_the_delivery_day()
+    {
+        await using (var db = _app.Db())
+        {
+            db.Resources.Add(new Resource
+            {
+                Id = Guid.CreateVersion7(),
+                Name = "North Kitchen",
+                Type = ResourceType.Catering,
+                Capacity = 20,
+                Units = 2,
+                OpensAt = new TimeOnly(8, 0),
+                ClosesAt = new TimeOnly(16, 0),
+                MaxDaysAhead = 90,
+                LastDay = new DateOnly(2026, 11, 27),
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+        _app.Model.On("lunch", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, deliveryAt = $"{Tomorrow}T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "lunch for 8 in Thames at 12:30 tomorrow"));
+
+        await using var check = _app.Db();
+        var payload = (await check.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("North Kitchen", payload);
+        Assert.Contains("Main Kitchen", payload);
+    }
+
+    [Fact]
+    public async Task The_same_proposal_twice_in_one_turn_is_offered_once()
+    {
+        _app.Model.On("a room", "Here.", ProposeRoom(Seed.SevernId, "09:00", "12:00", 10), ProposeRoom(Seed.SevernId, "09:00", "12:00", 10));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "a room for 10 tomorrow morning"));
+
+        Assert.Single(reply.Proposals);
+        await using var db = _app.Db();
+        Assert.Equal(1, await db.Proposals.CountAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Catering_proposed_against_a_room_is_refused_with_the_kitchens_to_use()
+    {
+        _app.Model.On("lunch", "Sorry.", Call("propose_booking",
+            new { resourceId = Seed.ThamesId, deliveryAt = "2026-11-26T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "lunch for 8 in Thames at 12:30 tomorrow"));
+
+        Assert.Empty(reply.Proposals);
+        await using var db = _app.Db();
+        var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("resourceId is the kitchen", payload);
+        Assert.Contains(Seed.MainKitchenId.ToString(), payload);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("2026-11-26T12:30")]
+    [InlineData("2026-11-26T12:00")]
+    public async Task Find_free_kitchens_needs_only_the_delivery_time(string? end)
+    {
+        // A catering order is delivered at a time; the model often sends that time as start and end, or no end.
+        _app.Model.On("lunch", "Main Kitchen.", Call("find_free_resources", new { type = "Catering", start = "2026-11-26T12:30", end, attendees = 8 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "lunch for 8 at 12:30 tomorrow?"));
+
+        await using var db = _app.Db();
+        var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("Main Kitchen", payload);
+        Assert.Contains(Seed.MainKitchenId.ToString(), payload);
     }
 
     [Fact]
@@ -544,7 +767,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
 
         // Nothing says what it cost, so the upper bound stands: the output cap plus the input's bytes.
         await using var db = _app.Db();
-        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens > 800);
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens > 4000);
     }
 
     [Fact]

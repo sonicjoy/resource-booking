@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using ResourceBooking.Bookings;
@@ -29,14 +30,24 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
         new TracedFunction(AIFunctionFactory.Create(ProposeCancellationAsync, "propose_cancellation"), trace),
     ];
 
-    [Description("Lists resources of a type that are free for a window and seat at least the attendees. Times are London wall-clock times like 2026-11-26T09:00.")]
+    [Description("Lists resources of a type that are free for a window and seat at least the attendees. Times are London wall-clock times like 2026-11-26T09:00. For Catering, start is the delivery time and end can be left out: it lists kitchens with an order free that day, with the ids propose_booking needs.")]
     public async Task<object> FindFreeResourcesAsync(
         [Description("MeetingRoom, Car or Catering")] string type,
-        string start, string end, int attendees, CancellationToken ct)
+        string start, string? end = null, int attendees = 1, CancellationToken ct = default)
     {
         if (!Enum.TryParse<ResourceType>(type, ignoreCase: false, out var kind) || !Enum.IsDefined(kind))
         {
             return "Unknown type: use MeetingRoom, Car or Catering.";
+        }
+        if (kind == ResourceType.Catering)
+        {
+            // A kitchen order is delivered at a time and takes a unit for its day; there is no end to check.
+            if (Local(start) is not { } delivery || CompanyTime.ToUtc(delivery, zone) is not { } at)
+            {
+                return "Give the delivery time as a London time like 2026-11-26T12:30.";
+            }
+            var kitchens = await availability.FreeAsync(kind, at, at, Math.Max(1, attendees), ct);
+            return kitchens.Select(r => new { r.Id, r.Name, r.Capacity }).ToList();
         }
         if (Local(start) is not { } from || Local(end) is not { } until || CompanyTime.ToUtc(from, zone) is not { } f
             || CompanyTime.ToUtc(until, zone) is not { } u || u <= f)
@@ -66,12 +77,21 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     }
 
     [Description("Proposes a new booking for the user to confirm; it books nothing. A room or car needs start and end; a catering order needs deliveryAt and a deliveryRoomId instead, and attendees is its portions.")]
-    public async Task<string> ProposeBookingAsync(Guid resourceId, int attendees, string? start = null, string? end = null,
-        string? title = null, string? deliveryAt = null, Guid? deliveryRoomId = null, CancellationToken ct = default)
+    public async Task<string> ProposeBookingAsync(
+        [Description("The room, car or kitchen to book. For a catering order this is the kitchen (find it with find_free_resources type Catering), not the room.")] Guid resourceId,
+        int attendees, string? start = null, string? end = null,
+        string? title = null, string? deliveryAt = null,
+        [Description("For a catering order: the meeting room it is delivered to.")] Guid? deliveryRoomId = null,
+        CancellationToken ct = default)
     {
+        (start, end, title, deliveryAt) = (Blank(start), Blank(end), Blank(title), Blank(deliveryAt));
         if (Unreadable(start, end, deliveryAt) is { } refusal)
         {
             return refusal;
+        }
+        if (Local(deliveryAt) is { } delivery && await NotAKitchenAsync(resourceId, DateOnly.FromDateTime(delivery), ct) is { } notAKitchen)
+        {
+            return notAKitchen;
         }
         var request = new BookingRequest
         {
@@ -90,6 +110,7 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     public async Task<string> ProposeChangeAsync(Guid bookingId, string? start = null, string? end = null, int? attendees = null,
         string? title = null, string? deliveryAt = null, Guid? deliveryRoomId = null, CancellationToken ct = default)
     {
+        (start, end, title, deliveryAt) = (Blank(start), Blank(end), Blank(title), Blank(deliveryAt));
         if (Unreadable(start, end, deliveryAt) is { } refusal)
         {
             return refusal;
@@ -143,11 +164,23 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     }
 
     /// <summary>
-    /// Saves an open proposal. Not with the request's token: a proposal half-saved when the turn timed out would
-    /// stay tracked and be sent again by the reply's trace save. A failed save is let go of for the same reason.
+    /// Saves an open proposal and returns its id, or returns the id of an identical proposal already open this turn:
+    /// the model sometimes proposes the same thing twice. Saved without the request's token: a proposal half-saved
+    /// when the turn timed out would stay tracked and be sent again by the reply's trace save. A failed save is let
+    /// go of for the same reason.
     /// </summary>
     private async Task<Guid> StoreAsync(ProposalKind kind, Guid? bookingId, string payload)
     {
+        // Compared as JSON: jsonb stores its own normalised text.
+        var wanted = JsonNode.Parse(payload);
+        var same = await db.Proposals.AsNoTracking()
+            .Where(p => p.ConversationId == conversationId && p.Turn == turn && p.Status == ProposalStatus.Open
+                && p.Kind == kind && p.BookingId == bookingId)
+            .Select(p => new { p.Id, p.Payload }).ToListAsync(CancellationToken.None);
+        if (same.FirstOrDefault(p => JsonNode.DeepEquals(JsonNode.Parse(p.Payload), wanted)) is { } existing)
+        {
+            return existing.Id;
+        }
         var proposal = new Proposal
         {
             Id = Guid.CreateVersion7(),
@@ -193,11 +226,35 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     private string CancelSummary(Booking booking) =>
         $"Cancel {booking.Resource!.Name}, {Text(CompanyTime.ToLocal(booking.DeliveryAt ?? booking.StartsAt, zone))}";
 
+    /// <summary>A blank argument from the model means "not given", the same as leaving it out.</summary>
+    private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
+
     private static readonly string[] Formats = ["yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm"];
 
     /// <summary>A London wall-clock date and time as the model writes it; anything else (a time with no date, an offset) is null.</summary>
     private static DateTime? Local(string? text) =>
         DateTime.TryParseExact(text?.Trim(), Formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t) ? t : null;
+
+    private const int KitchensListed = 10;
+
+    /// <summary>
+    /// A catering order sent with a room (or anything but a kitchen) as its resource: the refusal says which field is
+    /// which and lists up to <see cref="KitchensListed"/> kitchens taking orders that day, so the model can send it
+    /// again without another search.
+    /// </summary>
+    private async Task<string?> NotAKitchenAsync(Guid resourceId, DateOnly day, CancellationToken ct)
+    {
+        if (await db.Resources.AsNoTracking().AnyAsync(r => r.Id == resourceId && r.Type == ResourceType.Catering, ct))
+        {
+            return null;
+        }
+        var kitchens = await db.Resources.AsNoTracking()
+            .Where(r => r.Type == ResourceType.Catering && (r.LastDay == null || r.LastDay >= day))
+            .OrderBy(r => r.Name).Select(r => new { r.Name, r.Id }).ToListAsync(ct);
+        var listed = string.Join(", ", kitchens.Take(KitchensListed).Select(k => $"{k.Name} ({k.Id})"));
+        var more = kitchens.Count > KitchensListed ? $" and {kitchens.Count - KitchensListed} more (use find_free_resources)" : "";
+        return $"Not proposed: for a catering order resourceId is the kitchen and deliveryRoomId is the room. Kitchens: {(listed == "" ? "none that day" : listed)}{more}.";
+    }
 
     /// <summary>A refusal naming the first time given that isn't a full date and time, so it isn't silently ignored.</summary>
     private static string? Unreadable(params string?[] times) =>

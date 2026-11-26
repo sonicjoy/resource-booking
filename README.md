@@ -2,7 +2,7 @@
 
 An internal web app for booking meeting rooms, pool cars and catering. Employees book from a day overview or by asking an assistant in plain words. Admins manage users and resources, retire rooms and deactivate leavers, and read utilisation, history and assistant traces. The server enforces every booking rule, and PostgreSQL refuses double bookings.
 
-* **Live demo:** https://app-production-6da71d52.up.railway.app. Sign in as any seeded user: Ana and Ben are employees, Sam is an admin. The assistant answers only once an OpenAI key is configured there; until then it says it isn't set up.
+* **Live demo:** https://app-production-6da71d52.up.railway.app. Sign in as any seeded user: Ana and Ben are employees, Sam is an admin. The assistant runs on OpenAI's gpt-6-luna, within a daily token budget shared by all visitors.
 * **Design:** [docs/designs/resource-booking.md](docs/designs/resource-booking.md) covers the problem, user journeys, data model, rules, API, lock order, assistant and the build plan.
 
 ## What it does
@@ -56,10 +56,10 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your key>" --project src/ResourceBooki
 | Setting (environment variable) | Default | What it does |
 |---|---|---|
 | `ConnectionStrings__Db` | none | PostgreSQL connection string |
-| `OpenAI__ApiKey`, `OpenAI__Model` | none, `gpt-4.1-mini` | the assistant's model; the key never reaches the browser |
+| `OpenAI__ApiKey`, `OpenAI__Model` | none, `gpt-6-luna` | the assistant's model, called through OpenAI's Responses API with storage off; the key never reaches the browser |
 | `Assistant__DailyTokenBudget` | 200000 | tokens all users may spend per London day |
 | `Assistant__MessagesPerMinute` | 10 | per user; 0 turns the limit off |
-| `Assistant__MaxOutputTokens` | 800 | the most tokens one model call may write |
+| `Assistant__MaxOutputTokens` | 4000 | the most tokens one model call may write, reasoning included |
 | `Assistant__TimeoutSeconds` | 30 | how long one message may take |
 | `Assistant__MaxTurns` | 20 | messages per conversation |
 | `Assistant__MaxIterations` | 5 | rounds of tool calls per message |
