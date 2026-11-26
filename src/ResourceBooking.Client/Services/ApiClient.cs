@@ -66,9 +66,18 @@ public sealed class ApiClient(HttpClient http)
             {
                 return new((T)(object)true, null);
             }
-            return new(await response.Content.ReadFromJsonAsync<T>(), null);
+            try
+            {
+                return new(await response.Content.ReadFromJsonAsync<T>(), null);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // The server accepted the request; only its answer is unreadable. Don't invite a retry that repeats it.
+                return new(default, new ApiProblem((int)response.StatusCode, null,
+                    "The change may have been saved, but the answer couldn't be read. Refresh to check before trying again.", [], new Dictionary<string, string[]>()));
+            }
         }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             return new(default, ApiProblem.Unreachable);
         }
