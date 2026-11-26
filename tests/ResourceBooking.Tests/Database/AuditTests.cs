@@ -156,6 +156,96 @@ public class AuditTests(DbFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task An_edit_marked_modified_on_an_attached_stub_is_recorded_with_the_stored_value()
+    {
+        var room = NewRoom();
+        await using (var db = Db())
+        {
+            db.Resources.Add(room);
+            await db.SaveChangesAsync(Ct);
+        }
+
+        await using (var db = Db())
+        {
+            var stub = new Resource { Id = room.Id, Name = room.Name, Type = room.Type, Capacity = 6 };
+            db.Resources.Attach(stub);
+            db.Entry(stub).Property(r => r.Capacity).IsModified = true;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var modified = Assert.Single(await EventsAsync(), e => e.Action == "Modified");
+        var changes = JsonDocument.Parse(modified.Changes).RootElement;
+        Assert.Equal(4, changes.GetProperty("Capacity")[0].GetInt32());
+        Assert.Equal(6, changes.GetProperty("Capacity")[1].GetInt32());
+    }
+
+    [Fact]
+    public async Task A_property_set_on_an_attached_stub_records_the_stored_old_value_not_the_stubs()
+    {
+        var room = NewRoom();
+        await using (var db = Db())
+        {
+            db.Resources.Add(room);
+            await db.SaveChangesAsync(Ct);
+        }
+
+        await using (var db = Db())
+        {
+            var stub = new Resource { Id = room.Id, Name = room.Name, Type = room.Type };
+            db.Resources.Attach(stub);
+            stub.Capacity = 6;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var modified = Assert.Single(await EventsAsync(), e => e.Action == "Modified");
+        var changes = JsonDocument.Parse(modified.Changes).RootElement;
+        Assert.Equal(["Capacity"], changes.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(4, changes.GetProperty("Capacity")[0].GetInt32());
+    }
+
+    [Fact]
+    public async Task A_synchronous_save_through_Update_records_the_real_old_values()
+    {
+        var room = NewRoom();
+        await using (var db = Db())
+        {
+            db.Resources.Add(room);
+            await db.SaveChangesAsync(Ct);
+        }
+
+        using (var db = Db())
+        {
+            db.Resources.Update(new Resource { Id = room.Id, Name = room.Name, Type = room.Type, Capacity = 6 });
+            db.SaveChanges();
+        }
+
+        var modified = Assert.Single(await EventsAsync(), e => e.Action == "Modified");
+        var changes = JsonDocument.Parse(modified.Changes).RootElement;
+        Assert.Equal(["Capacity"], changes.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(4, changes.GetProperty("Capacity")[0].GetInt32());
+    }
+
+    [Fact]
+    public async Task A_cancelled_save_leaves_nothing_queued_for_the_next_one()
+    {
+        var user = NewUser();
+        await using var db = Db();
+        db.Users.Add(user);
+        await db.SaveChangesAsync(Ct);
+        var before = (await EventsAsync()).Count;
+
+        user.DisplayName = "Changed";
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => db.SaveChangesAsync(cancelled.Token));
+        await db.Entry(user).ReloadAsync(Ct);
+        db.Users.Add(NewUser("Dan"));
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(before + 1, (await EventsAsync()).Count);
+    }
+
+    [Fact]
     public async Task Saving_with_nothing_changed_writes_no_event()
     {
         var user = NewUser();
