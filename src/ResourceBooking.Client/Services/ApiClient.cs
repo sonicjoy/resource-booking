@@ -30,6 +30,9 @@ public sealed class ApiClient(HttpClient http, Auth.MeAuthenticationStateProvide
     public Task<ApiResult<AvailabilityDay>> AvailabilityAsync(DateOnly date, ResourceType type) =>
         GetAsync<AvailabilityDay>(string.Create(CultureInfo.InvariantCulture, $"api/availability?date={date:yyyy-MM-dd}&type={type}"));
 
+    public Task<ApiResult<MonthOccupancy>> MonthAsync(int year, int month, ResourceType type) =>
+        GetAsync<MonthOccupancy>(string.Create(CultureInfo.InvariantCulture, $"api/availability/month?year={year}&month={month}&type={type}"));
+
     public Task<ApiResult<List<ResourceDto>>> ResourcesAsync() => GetAsync<List<ResourceDto>>("api/resources");
 
     public Task<ApiResult<List<ResourceDto>>> FreeAsync(ResourceType type, DateTime start, DateTime end, int attendees) =>

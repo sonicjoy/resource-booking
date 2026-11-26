@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject ApiClient Api
 @inject CompanyClock Clock
+@inject NavigationManager Navigation
 
 <PageTitle>Book</PageTitle>
 
@@ -57,8 +58,8 @@ else if (Type == ResourceType.Catering)
         {
             <FluentCard>
                 <h2>@kitchen.Name</h2>
-                <p>@kitchen.Name: @kitchen.FreeUnits of @kitchen.Units free</p>
-                <p class="hint">Up to @kitchen.Capacity portions an order@(Hours(kitchen))</p>
+                <p>@kitchen.Name: @kitchen.FreeUnits of @kitchen.Units orders left on this day</p>
+                <p class="hint">Takes @kitchen.Units orders a day, up to @kitchen.Capacity portions each@(Hours(kitchen)).</p>
                 <FluentButton Appearance="ButtonAppearance.Primary" Disabled="kitchen.FreeUnits == 0" OnClick="() => Order(kitchen)">Order</FluentButton>
             </FluentCard>
         }
@@ -141,15 +142,51 @@ else
         _ => ResourceType.MeetingRoom,
     };
 
+    // A link such as /?date=2026-12-03&type=Car (from Month) opens that day and type; anything unreadable falls back to today and rooms.
+    [SupplyParameterFromQuery(Name = "date")]
+    public string? DateQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeQuery { get; set; }
+
+    private bool started;
+
     protected override async Task OnInitializedAsync()
     {
-        date = Clock.Today;
         var list = await Api.ResourcesAsync();
         resourcesError = list.Problem?.Message;
         resources = list.Value?.ToDictionary(r => r.Id) ?? [];
         kitchens = resources.Values.Where(r => r.Type == ResourceType.Catering).OrderBy(r => r.Name).ToList();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var wantedDate = DateOnly.TryParseExact(DateQuery, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var d) ? d : Clock.Today;
+        var wantedTab = Enum.TryParse<ResourceType>(TypeQuery, out var t) && Enum.IsDefined(t) ? TabOf(t) : "rooms";
+        if (started && wantedDate == date && wantedTab == activeTab)
+        {
+            return;
+        }
+        started = true;
+        (date, activeTab) = (wantedDate, wantedTab);
+        saved = null;
+        day = null;
         await LoadAsync();
     }
+
+    private static string TabOf(ResourceType t) => t switch
+    {
+        ResourceType.Car => "cars",
+        ResourceType.Catering => "catering",
+        _ => "rooms",
+    };
+
+    private bool OnThisPage => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0] == "";
+
+    // Keeps the shown day and type in the address, so reload and Back return to them.
+    private void Remember() =>
+        Navigation.NavigateTo(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"./?date={date:yyyy-MM-dd}&type={Type}"), replace: true);
 
     private int load;
 
@@ -172,6 +209,7 @@ else
         date = date.AddDays(days);
         saved = null;
         day = null;
+        Remember();
         await LoadAsync();
     }
 
@@ -182,18 +220,21 @@ else
             date = picked;
             saved = null;
             day = null;
+            Remember();
             await LoadAsync();
         }
     }
 
     private async Task TabChangedAsync(string? tab)
     {
-        if (tab is null || tab == activeTab)
+        // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
+        if (tab is null || tab == activeTab || !OnThisPage)
         {
             return;
         }
         activeTab = tab;
         day = null;
+        Remember();
         await LoadAsync();
     }
 
@@ -227,7 +268,9 @@ else
         {
             return busy.Mine
                 ? new("mine", $"{at}, your booking: {busy.Title ?? "untitled"}", busy.Title ?? "Yours")
-                : new("booked", $"{at}, booked", "Booked");
+                : busy.Owner is { } owner
+                    ? new("booked", $"{at}, booked by {owner}", $"Booked: {owner}")
+                    : new("booked", $"{at}, booked", "Booked");
         }
         // A car needs its gap after each booking, and a booking starting here needs its own gap before the next one.
         var gap = resources.TryGetValue(resource.Id, out var info) ? info.Turnaround ?? TimeSpan.Zero : TimeSpan.Zero;

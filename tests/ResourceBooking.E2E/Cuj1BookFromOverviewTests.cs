@@ -32,7 +32,7 @@ public class Cuj1BookFromOverviewTests(AppFixture app) : IAsyncLifetime
 
         await Expect(ana.Cell("Thames", "14:00")).ToHaveAttributeAsync("aria-label", new System.Text.RegularExpressions.Regex("your booking"));
         await ana.OpenTabAsync("Catering");
-        await Expect(ana.GetByText("Main Kitchen: 4 of 5 free")).ToBeVisibleAsync();
+        await Expect(ana.GetByText("Main Kitchen: 4 of 5 orders left on this day")).ToBeVisibleAsync();
 
         await ana.GetByRole(AriaRole.Link, new() { Name = "My bookings" }).ClickAsync();
         var upcoming = ana.GetByRole(AriaRole.Table);
@@ -43,7 +43,7 @@ public class Cuj1BookFromOverviewTests(AppFixture app) : IAsyncLifetime
         await ben.GoToTomorrowAsync();
         await Expect(ben.Cell("Thames", "14:00")).ToHaveAttributeAsync("aria-label", "Thames, 14:00, booked");
         await ben.OpenTabAsync("Catering");
-        await Expect(ben.GetByText("Main Kitchen: 4 of 5 free")).ToBeVisibleAsync();
+        await Expect(ben.GetByText("Main Kitchen: 4 of 5 orders left on this day")).ToBeVisibleAsync();
         await ben.OpenTabAsync("Rooms");
         await ben.Cell("Thames", "16:00").ClickAsync();
         await ben.FillFieldAsync("Start", "14:30");
