@@ -27,6 +27,8 @@ public static class Seed
     /// </summary>
     public static async Task ReseedAsync(AppDb db, TimeProvider clock, TimeZoneInfo zone, CancellationToken ct)
     {
+        // Seeding is the system's write, whoever asked for it; the endpoint logs who did.
+        using var asSystem = AuditInterceptor.AsSystem();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlRawAsync(
             "TRUNCATE notices, proposals, assistant_steps, audit_events, bookings, resources, users", ct);

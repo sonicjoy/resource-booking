@@ -58,8 +58,15 @@ public sealed class DbFixture : IAsyncLifetime
         return ConnectionString(name);
     }
 
-    public static AppDb CreateDb(string connectionString) =>
-        new((DbContextOptions<AppDb>)AppDb.Configure(new DbContextOptionsBuilder<AppDb>(), connectionString).Options);
+    public static AppDb CreateDb(string connectionString, AuditInterceptor? audit = null)
+    {
+        var options = AppDb.Configure(new DbContextOptionsBuilder<AppDb>(), connectionString);
+        if (audit is not null)
+        {
+            options.AddInterceptors(audit);
+        }
+        return new AppDb((DbContextOptions<AppDb>)options.Options);
+    }
 
     private string ConnectionString(string database) =>
         new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = database }.ConnectionString;

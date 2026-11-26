@@ -14,8 +14,13 @@ var companyZone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["Boo
 builder.Services.AddSingleton(companyZone);
 builder.Services.AddSingleton(TimeProvider.System);
 
-builder.Services.AddDbContext<AppDb>(options =>
-    AppDb.Configure(options, builder.Configuration.GetConnectionString("Db")));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(services => new AuditInterceptor(
+    services.GetRequiredService<TimeProvider>(),
+    () => services.GetRequiredService<IHttpContextAccessor>().HttpContext?.User.UserId()));
+builder.Services.AddDbContext<AppDb>((services, options) =>
+    AppDb.Configure(options, builder.Configuration.GetConnectionString("Db"))
+        .AddInterceptors(services.GetRequiredService<AuditInterceptor>()));
 
 builder.Services.AddAppAuthentication(builder.Environment);
 builder.Services.AddApiGuards();
