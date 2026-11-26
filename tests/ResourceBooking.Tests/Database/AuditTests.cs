@@ -64,9 +64,9 @@ public class AuditTests(DbFixture fixture) : IAsyncLifetime
 
         var events = await EventsAsync();
 
-        Assert.Equal(
-            [("User", user.Id), ("Resource", room.Id), ("Booking", booking.Id)],
-            events.Select(e => (e.EntityType, e.EntityId)).Order().ToList().OrderBy(x => x.Item1 == "User" ? 0 : x.Item1 == "Resource" ? 1 : 2));
+        Assert.Equivalent(
+            new[] { ("User", user.Id), ("Resource", room.Id), ("Booking", booking.Id) },
+            events.Select(e => (e.EntityType, e.EntityId)), strict: true);
         Assert.All(events, e =>
         {
             Assert.Equal("Added", e.Action);
@@ -103,6 +103,56 @@ public class AuditTests(DbFixture fixture) : IAsyncLifetime
         Assert.Equal(["CancelReason", "Status"], changes.EnumerateObject().Select(p => p.Name).Order());
         Assert.Equal("Confirmed", changes.GetProperty("Status")[0].GetString());
         Assert.Equal("Cancelled", changes.GetProperty("Status")[1].GetString());
+    }
+
+    [Fact]
+    public async Task An_edit_saved_through_Update_records_the_real_old_values()
+    {
+        var room = NewRoom();
+        await using (var db = Db())
+        {
+            db.Resources.Add(room);
+            await db.SaveChangesAsync(Ct);
+        }
+
+        await using (var db = Db())
+        {
+            db.Resources.Update(new Resource
+            {
+                Id = room.Id,
+                Name = room.Name,
+                Type = room.Type,
+                Capacity = 6,
+                LastDay = new DateOnly(2026, 11, 27),
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var modified = Assert.Single(await EventsAsync(), e => e.Action == "Modified");
+        var changes = JsonDocument.Parse(modified.Changes).RootElement;
+        Assert.Equal(["Capacity", "LastDay"], changes.EnumerateObject().Select(p => p.Name).Order());
+        Assert.Equal(4, changes.GetProperty("Capacity")[0].GetInt32());
+        Assert.Equal("retired", Reports.HistoryLabels.Verb(modified));
+    }
+
+    [Fact]
+    public async Task A_failed_save_leaves_nothing_queued_for_the_next_one()
+    {
+        var user = NewUser();
+        var room = NewRoom();
+        await using var db = Db();
+        db.AddRange(user, room, NewBooking(room.Id, user.Id));
+        await db.SaveChangesAsync(Ct);
+        var before = (await EventsAsync()).Count;
+
+        var clash = NewBooking(room.Id, user.Id);
+        db.Bookings.Add(clash);
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync(Ct));
+        db.Entry(clash).State = EntityState.Detached;
+        db.Users.Add(NewUser("Dan"));
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(before + 1, (await EventsAsync()).Count);
     }
 
     [Fact]

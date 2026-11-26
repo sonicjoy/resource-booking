@@ -24,6 +24,8 @@ public class HistoryLabelsTests
     [InlineData("User", "Added", "{}", "added")]
     [InlineData("User", "Modified", """{"IsActive":[true,false]}""", "deactivated")]
     [InlineData("User", "Modified", """{"Role":["Employee","Admin"]}""", "changed")]
+    [InlineData("User", "Modified", """{"IsActive":[false,true]}""", "changed")]
+    [InlineData("Resource", "Modified", """{"LastDay":["2026-11-27",null]}""", "changed")]
     public void Each_event_has_a_verb(string type, string action, string changes, string verb) =>
         Assert.Equal(verb, HistoryLabels.Verb(Event(type, action, changes)));
 }
