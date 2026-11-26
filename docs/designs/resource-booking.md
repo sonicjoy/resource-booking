@@ -51,6 +51,7 @@ None. Platform assumptions that are not yet verified are listed under Risks & Mi
 **Seed data.** Every CUJ starts from a fresh seed, with dates relative to today in Europe/London.
 
 * **People:** Ana and Ben (employees; Ben has two future bookings) and Sam (admin), all on `sonicjoy-solutions.com`.
+* **Every resource:** bookable up to 90 days ahead; rooms and the car for 15 minutes at least.
 * **Thames:** meeting room, 8 seats, open 08:00 to 18:00, 4 hours at most.
 * **Severn:** meeting room, 12 seats, open 08:00 to 18:00, with a booking by Ana in three days.
 * **Pool Car 1:** car, 4 seats, open 07:00 to 19:00, 60-minute turnaround, booked tomorrow from 09:00 to 11:00.
@@ -122,7 +123,7 @@ ASP.NET Core host (ResourceBooking)
 EF Core + AuditInterceptor --> PostgreSQL (exclusion constraint, checks)
 ```
 
-`ResourceBooking.Shared` holds the DTOs, enums, refusal codes, the map from resource type to rule fields, and the validation attributes. `builder.Services.AddValidation()` runs those attributes on every endpoint and returns 400 before the handler runs; `DataAnnotationsValidator` runs the same attributes in the forms. The Blazor Web App template is used with WebAssembly interactivity. One ASP.NET Core project serves the API and the client from one origin. Prerendering is off, so components run only in the browser.
+`ResourceBooking.Shared` holds the DTOs, enums, refusal codes, the map from resource type to rule fields, and the validation attributes. Each write endpoint runs those attributes, and the request's own `IValidatableObject` rules, through `Validator` (`ApiResults.Invalid`) and returns a 400 validation problem before anything else; `DataAnnotationsValidator` runs the same attributes in the forms. The Blazor Web App template is used with WebAssembly interactivity. One ASP.NET Core project serves the API and the client from one origin. Prerendering is off, so components run only in the browser.
 
 ### Data model
 
@@ -226,7 +227,7 @@ The endpoints validate the request's shape before `BookingService` runs. `Bookin
    * it is under 24 hours old;
    * its kind matches the endpoint (`Create` to `POST`; `Change` or `Cancel` to the same booking).
 
-   `changed_before_confirm` is set when the submitted values differ from the proposal's payload. If any check fails, the booking goes ahead unlinked. A proposal never makes a booking fail.
+   The proposal row is read `FOR UPDATE SKIP LOCKED`, so a second request carrying the same proposal books unlinked rather than waiting (waiting could deadlock with the foreign-key lock a catering order takes on its delivery room). `changed_before_confirm` is set when the submitted values differ from the proposal's payload. If any check fails, the booking goes ahead unlinked. A proposal never makes a booking fail.
 
 **Cancel** runs steps 1 to 3, then sets `status = Cancelled` and fills `cancel_reason`. Rows are never deleted, except by reseed.
 
@@ -398,7 +399,7 @@ The options rejected during ideation are in [concepts_brief.md](concepts_brief.m
   * **Railway connection string and port (step 1).** Build `ConnectionStrings__Db` in key=value form from the `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` and `PGDATABASE` reference variables. Target port 8080, and enable wait-for-CI. Fallback: set the values manually.
   * **Time-zone data in the image (step 1).** Fallback: install `tzdata`.
   * **`btree_gist` on Railway (step 2).** Fallback: drop the constraint and run the overlap check as a query under the existing row lock.
-  * **`AddValidation()` picks up Shared DTOs (step 6).** Fallback: an endpoint filter that calls `Validator`.
+  * **Request validation (step 6).** Settled: endpoints call `Validator` directly rather than relying on `AddValidation()` to discover DTOs in the Shared project.
   * **`WebApplicationFactory` on Kestrel serves the WebAssembly client, and Playwright can type into Fluent inputs (step 7).** Fallback: start the app with `dotnet run`, and target the inner `input`.
   * **Package majors** (Fluent UI, Microsoft.Extensions.AI.OpenAI, EFCore.NamingConventions for EF Core 10). Settled with `dotnet package search` in step 1.
 * **Overlapping deploys.** Migrations on start are safe with one replica. They also stay backward-compatible, in case Railway briefly runs the old and new containers together.

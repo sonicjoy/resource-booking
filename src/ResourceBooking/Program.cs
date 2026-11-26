@@ -22,6 +22,8 @@ builder.Services.AddDbContext<AppDb>((services, options) =>
     AppDb.Configure(options, builder.Configuration.GetConnectionString("Db"))
         .AddInterceptors(services.GetRequiredService<AuditInterceptor>()));
 
+builder.Services.AddScoped<ResourceBooking.Bookings.BookingService>();
+builder.Services.AddScoped<ResourceBooking.Bookings.AvailabilityService>();
 builder.Services.AddAppAuthentication(builder.Environment);
 builder.Services.AddApiGuards();
 builder.Services.AddProblemDetails();
@@ -73,6 +75,9 @@ app.MapHealthEndpoints();
 var api = app.MapGroup("/api").RequireAuthorization().RequireSameOrigin();
 api.MapAuthEndpoints();
 api.MapAdminEndpoints();
+api.MapBookingEndpoints();
+api.MapAvailabilityEndpoints();
+api.MapNoticeEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
     .AddAdditionalAssemblies(typeof(ResourceBooking.Client._Imports).Assembly);

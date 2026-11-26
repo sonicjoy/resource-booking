@@ -61,7 +61,9 @@ public static class Seed
             Capacity = 8,
             OpensAt = new TimeOnly(8, 0),
             ClosesAt = new TimeOnly(18, 0),
+            MinDuration = TimeSpan.FromMinutes(15),
             MaxDuration = TimeSpan.FromHours(4),
+            MaxDaysAhead = 90,
         };
         var severn = new Resource
         {
@@ -71,6 +73,8 @@ public static class Seed
             Capacity = 12,
             OpensAt = new TimeOnly(8, 0),
             ClosesAt = new TimeOnly(18, 0),
+            MinDuration = TimeSpan.FromMinutes(15),
+            MaxDaysAhead = 90,
         };
         var car = new Resource
         {
@@ -80,7 +84,9 @@ public static class Seed
             Capacity = 4,
             OpensAt = new TimeOnly(7, 0),
             ClosesAt = new TimeOnly(19, 0),
+            MinDuration = TimeSpan.FromMinutes(15),
             MaxDuration = TimeSpan.FromDays(3),
+            MaxDaysAhead = 90,
             Turnaround = TimeSpan.FromMinutes(60),
         };
         var kitchen = new Resource
@@ -92,6 +98,7 @@ public static class Seed
             Units = 5,
             OpensAt = new TimeOnly(8, 0),
             ClosesAt = new TimeOnly(16, 0),
+            MaxDaysAhead = 90,
         };
         db.Resources.AddRange(thames, severn, car, kitchen);
 
