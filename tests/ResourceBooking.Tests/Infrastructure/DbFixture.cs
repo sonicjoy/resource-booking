@@ -15,7 +15,10 @@ namespace ResourceBooking.Tests.Infrastructure;
 public sealed class DbFixture : IAsyncLifetime
 {
     private const string TemplateName = "rb_template";
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    // Every test gets its own app and connection pool, which outgrows PostgreSQL's default of 100 connections.
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:17-alpine")
+        .WithCommand("-c", "max_connections=500")
+        .Build();
     private readonly SemaphoreSlim _cloneLock = new(1, 1);
 
     public async ValueTask InitializeAsync()
