@@ -233,6 +233,22 @@ public class BookingRulesTests
     }
 
     [Fact]
+    public void The_booking_window_counts_from_the_start()
+    {
+        var room = new Resource { Name = "Avon", Type = ResourceType.MeetingRoom, Capacity = 4, MaxDaysAhead = 30 };
+        var car = Car();
+        car.MaxDaysAhead = 30;
+        car.MaxDuration = null;
+
+        Assert.Empty(Check(Room(At(30, 23), At(31, 0), 2), room));
+        Assert.Empty(Check(Room(At(29, 9), At(32, 9), 2), car));
+    }
+
+    [Fact]
+    public void A_kitchen_delivery_exactly_at_closing_time_is_refused() =>
+        AssertOnly(Check(Order(At(1, 16)), Kitchen()), RuleCodes.OutsideOpeningHours, "Main Kitchen delivers between 08:00 and 16:00");
+
+    [Fact]
     public void A_car_picked_up_exactly_at_closing_time_is_refused() =>
         AssertOnly(Check(Room(At(1, 19), At(2, 9), 2), Car()), RuleCodes.OutsideOpeningHours,
             "Pool Car 1 can be picked up and returned between 07:00 and 19:00");
