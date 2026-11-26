@@ -323,6 +323,49 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(4));
     }
 
+    [Fact]
+    public async Task With_no_model_configured_the_reply_says_so_and_nothing_else_breaks()
+    {
+        _app.Model.Failure = new ResourceBooking.Assistant.AssistantUnavailableException();
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "a room please"));
+
+        Assert.Equal(ResourceBooking.Assistant.AssistantService.NotSetUp, reply.Text);
+        Assert.Empty(reply.Proposals);
+    }
+
+    [Fact]
+    public async Task A_model_that_keeps_calling_tools_is_stopped_after_5_rounds()
+    {
+        _app.Model.NeverReply = true;
+        _app.Model.On("my bookings", "never sent", Call("get_my_bookings", new { }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var response = await SayAsync(ana, "my bookings, again and again");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await using var db = _app.Db();
+        var tools = await db.AssistantSteps.CountAsync(s => s.Kind == StepKind.ToolCall, Ct);
+        Assert.InRange(tools, 1, 5);
+        Assert.InRange(_app.Model.Calls.Count, 2, 6);
+    }
+
+    [Theory]
+    [InlineData(0, HttpStatusCode.BadRequest)]
+    [InlineData(1, HttpStatusCode.OK)]
+    [InlineData(1000, HttpStatusCode.OK)]
+    [InlineData(1001, HttpStatusCode.BadRequest)]
+    public async Task A_message_is_1_to_1000_characters(int length, HttpStatusCode expected)
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var response = await SayAsync(ana, new string('a', length));
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal(expected == HttpStatusCode.OK ? 1 : 0, _app.Model.Calls.Count);
+    }
+
     // ---- level 3: a proposal is offered exactly when the same request would book ----
 
     [Fact]

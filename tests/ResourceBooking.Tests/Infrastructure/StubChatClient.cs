@@ -19,6 +19,9 @@ public sealed class StubChatClient : IChatClient
     /// <summary>Waits before answering, to test timeouts.</summary>
     public TimeSpan Delay { get; set; }
 
+    /// <summary>Asks for the scripted tool calls on every call, never replying, to test the loop cap.</summary>
+    public bool NeverReply { get; set; }
+
     /// <summary>Every message list the model was sent, in order.</summary>
     public List<List<ChatMessage>> Calls { get; } = [];
 
@@ -54,7 +57,7 @@ public sealed class StubChatClient : IChatClient
 
         // Tool results after the latest user message mean the calls were made: answer with the reply.
         var sinceUser = list.SkipWhile(m => m != list.Last(x => x.Role == ChatRole.User)).Skip(1);
-        if (script.Calls.Count == 0 || sinceUser.Any(m => m.Contents.OfType<FunctionResultContent>().Any()))
+        if (script.Calls.Count == 0 || (!NeverReply && sinceUser.Any(m => m.Contents.OfType<FunctionResultContent>().Any())))
         {
             return new ChatResponse(new ChatMessage(ChatRole.Assistant, script.Reply)) { Usage = usage };
         }
