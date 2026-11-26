@@ -62,7 +62,7 @@ None. Platform assumptions that are not yet verified are listed under Risks & Mi
 
 * **Given**: Ana is signed in, and Thames is free tomorrow from 14:00 to 15:00.
 * **When**: she selects that slot on the overview, enters 6 attendees and confirms. She then orders 6 portions from Main Kitchen, delivered to Thames at 14:00.
-* **Then**: both bookings appear in her bookings. Everyone sees the Thames slot as busy and "Main Kitchen: 4 of 5 free" for tomorrow.
+* **Then**: both bookings appear in her bookings. Everyone sees the Thames slot as busy and "Main Kitchen: 4 of 5 orders left on this day" for tomorrow.
 * **When**: Ben tries Thames from 14:30 to 15:30.
 * **Then**: he gets "Thames is already booked then" (409) and a "Find alternatives" link that lists rooms free for that window.
 
@@ -139,7 +139,7 @@ Tables use snake_case (EFCore.NamingConventions). Enums are stored as text. Ids 
 * **bookings**:
   * `id`, `resource_id`, `user_id`.
   * `unit_no`: 0, except for catering orders.
-  * `title`: optional, and shown only to the owner and to admins.
+  * `title`: optional, and shown only to its owner (see [Visibility](#visibility)).
   * `starts_at`, `ends_at`, `blocked_until`.
   * `attendees`: portions, for catering.
   * `delivery_at`, `delivery_room_id`: catering only.
@@ -268,7 +268,8 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 | Method and path | Who | Result |
 | --- | --- | --- |
 | `GET /api/auth/sign-in-options`, `POST /api/auth/sign-in`, `POST /api/auth/sign-out`, `GET /api/auth/me` | anyone | Mock SSO: pick an active user and get a cookie. |
-| `GET /api/availability?date&type` | signed in | Free/busy per resource for one local day. Other people's busy blocks carry no owner and no title. Kitchens show "n of m free". |
+| `GET /api/availability?date&type` | signed in | Free/busy per resource for one local day, following [Visibility](#visibility). Kitchens report free orders out of units. |
+| `GET /api/availability/month?year&month&type` | signed in | Used, available and share per calendar day for one type, totals only ([month view](month-view.md)). 400 for a bad month, year or type. |
 | `GET /api/resources/free?type&start&end&attendees` | signed in | Resources free for a window, tested against `blocked_until`. |
 | `GET /api/resources`, `GET /api/resources/{id}` | signed in | Active resources (admins also see retired ones). |
 | `POST /api/resources`, `PUT /api/resources/{id}` | admin | 201 or 200. `PUT` cannot change `type` or `last_day`. |
@@ -285,6 +286,17 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 | `POST /api/assistant/messages` `{conversationId?, text}` | signed in | Reply text and any open proposals. |
 | `GET /api/assistant/traces?from&to`, `GET /api/assistant/traces/{conversationId}` | admin | Traces and their steps. |
 | `POST /api/admin/reseed` | admin | 204. Resets the demo data. 429 `RATE_LIMITED` with `Retry-After` when called again within the window (`Demo:ReseedWindowSeconds`, default 30, once across the app; 0 turns it off for end-to-end runs). |
+
+### Visibility
+
+What a caller sees of other people's bookings, amended by the [month view design](month-view.md):
+
+| Where | Owner | Admin, someone else's booking | Employee, someone else's booking |
+| --- | --- | --- | --- |
+| Book grid (`GET /api/availability`) | title | name, no title | neither |
+| Month view | totals only | totals only | totals only |
+| Assistant tool results | own bookings | nothing of others' | nothing of others' |
+| History and Traces | not shown | titles, as audit records | not shown |
 
 ### Access
 
@@ -336,17 +348,17 @@ Simple layouts built from stock Fluent UI components. All times are shown in the
 
 * **Shell.**
   * A top bar holds the app name, navigation by role, a notices badge and a user menu with Sign out.
-  * Employees see Book and My bookings. Admins also see Users, Resources, Utilisation, History and Traces.
+  * Employees see Book, Month and My bookings. Admins also see Users, Resources, Utilisation, History and Traces.
   * Everyone lands on Book.
 * **Sign-in.** A card lists the seeded users, grouped by role, and clicking one signs in. The card is labelled "Demo sign-in, standing in for company SSO".
 * **Book (overview).** A date picker with previous-day and next-day buttons, and tabs for Rooms, Cars and Catering.
   * **Rooms and Cars:** a grid with one row per resource (name and seats) and one column per half-hour.
     * Closed hours are greyed out.
-    * Other people's bookings show as "Booked", with no name.
+    * Other people's bookings show as "Booked"; admins see "Booked: {name}", never the title (see [Visibility](#visibility)).
     * The user's own bookings show in the accent colour, with their titles.
     * Clicking a free cell opens the booking form, pre-filled for one hour.
     * A multi-day car booking shows as busy across each day it covers.
-  * **Catering:** one card per kitchen showing "n of m free" for the day, with an Order button.
+  * **Catering:** one card per kitchen showing "{free} of {units} orders left on this day" and "Takes {units} orders a day, up to {portions} portions each", with an Order button.
   * **Assistant:** an "Ask assistant" button opens it as a side panel on the right, closed by default. Proposals appear in the panel as cards, and each card's Review button opens the same booking form. The grid refreshes after each confirmation.
 * **Booking form (dialog).**
   * **Fields:** resource, date, start, end, attendees and an optional title. For catering: kitchen, delivery time, portions, and a delivery-room dropdown of active rooms.
@@ -464,7 +476,7 @@ Steps 2 to 10 write their tests first and run them failing.
      * An edit at the user's cap is allowed.
      * Owner-only access returns 404 to anyone else.
      * Proposal links: wrong owner, not `Open`, expired and wrong kind each book unlinked; `changed_before_confirm` is set.
-     * An employee's availability shows no other owner or title.
+     * Availability follows [Visibility](#visibility): an employee sees no other owner or title, and an admin sees names but no titles.
      * Every write path leaves its audit row.
 7. **Employee screens and journeys.** Test tier `basic`: UI and wiring.
    * **Client:** `Client/Services/ApiClient.cs`, which maps Problem Details to messages; `Client/Pages/Overview.razor` and `Overview.razor.css`; `MyBookings.razor`; `Client/Components/BookingForm.razor` and `NoticesBadge.razor`.

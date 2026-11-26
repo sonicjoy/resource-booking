@@ -3,11 +3,12 @@
 An internal web app for booking meeting rooms, pool cars and catering. Employees book from a day overview or by asking an assistant in plain words. Admins manage users and resources, retire rooms and deactivate leavers, and read utilisation, history and assistant traces. The server enforces every booking rule, and PostgreSQL refuses double bookings.
 
 * **Live demo:** https://app-production-6da71d52.up.railway.app. Sign in as any seeded user: Ana and Ben are employees, Sam is an admin. The assistant answers only once an OpenAI key is configured there; until then it says it isn't set up.
-* **Design:** [docs/designs/resource-booking.md](docs/designs/resource-booking.md) covers the problem, user journeys, data model, rules, API, lock order, assistant and the build plan.
+* **Design:** [docs/designs/resource-booking.md](docs/designs/resource-booking.md) covers the problem, user journeys, data model, rules, API, lock order, assistant and the build plan. [docs/designs/month-view.md](docs/designs/month-view.md) adds the month view and narrows what admins see of other people's bookings.
 
 ## What it does
 
 * **Book.** A grid of rooms and cars per half hour, and kitchens with free units per day. Clicking a free cell opens the booking form. A clash offers free alternatives, and a room booking offers "Add catering".
+* **Month.** A calendar for one type at a time showing how busy each day is (share of open hours, or kitchen orders taken). Clicking a day opens Book on that date. Admins see who holds each booking on Book, never its title.
 * **Rules.** Opening hours, notice, how far ahead, length, capacity, a turnaround gap for cars, and kitchen units. Each refusal says which rule failed.
 * **My bookings.** Edit or cancel upcoming bookings, and read notices when an admin's change cancels one.
 * **Admin.** Users, resources (each type shows only its rule fields), retirement and deactivation with cascading cancellations, utilisation, history and traces.
