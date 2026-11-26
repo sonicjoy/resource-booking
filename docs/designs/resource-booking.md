@@ -259,7 +259,7 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 * **401:** not signed in, or session rejected.
 * **403:** not an admin.
 * **404:** not found, or not yours.
-* **409:** `OVERLAP`, `NOT_CONFIRMED`.
+* **409:** `OVERLAP`, `NOT_CONFIRMED`, `DUPLICATE` (an email or resource name already in use; emails compare in lower case).
 * **422:** the rule codes above, plus `ALREADY_STARTED`, `IN_USE`, `LAST_DAY_PAST`, `LAST_ADMIN`, `UNITS_IN_USE`.
 * **429:** `RATE_LIMITED`, `BUDGET_EXHAUSTED`.
 
