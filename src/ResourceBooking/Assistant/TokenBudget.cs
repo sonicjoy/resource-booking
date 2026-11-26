@@ -7,7 +7,8 @@ namespace ResourceBooking.Assistant;
 
 /// <summary>
 /// One global daily token budget (design: "Limits and failures"), counted per London day in token_usage. It is
-/// checked before each model call and charged after it, so one call can overshoot by its own size, never more.
+/// checked before each model call and charged after it, so each call already in flight when the budget runs out
+/// can overshoot it by that call's size; one at a time, the day stops within one call of the budget.
 /// </summary>
 public sealed class TokenBudget(AppDb db, TimeProvider clock, TimeZoneInfo zone, IOptions<AssistantOptions> options)
 {
