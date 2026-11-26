@@ -1,5 +1,6 @@
 {
-  "about": "Requests to the assistant and the proposals a good answer makes, run against the real model by EvalTests (Category=Eval). The clock is Wednesday 25 November 2026, 09:00 in London, on the seed data. Each expectation must match one proposal of the turn, and the turn must have no others; an empty list means nothing may be proposed. Times are London wall-clock times; startFrom and startTo bound a start or delivery time, both inclusive.",
+  "about": "Requests to the assistant and the proposals a good answer makes, run against the real model by EvalTests (Category=Eval). The clock is now (Wednesday 25 November 2026, 09:00 in London), on the seed data. Each expectation must match one proposal of the turn, and the turn must have no others; an empty list means nothing may be proposed. Times are London wall-clock times; startFrom and startTo bound a start or delivery time, both inclusive.",
+  "now": "2026-11-25T09:00:00Z",
   "cases": [
     {
       "name": "room and lunch, then more people",

@@ -6,7 +6,7 @@
 <PageTitle>Traces</PageTitle>
 
 <h1>Traces</h1>
-<p class="hint">Every assistant conversation, newest first: what was asked, each model and tool call, and the reply. London time.</p>
+<p class="hint">Assistant conversations with a step in these dates, newest first, up to 200: what was asked, each model and tool call, and the reply. Counts cover the steps in these dates. London time.</p>
 
 <div class="filters">
     <label class="field"><span>From</span><input type="date" value="@from.ToString("yyyy-MM-dd")" @onchange="e => DateChanged(e, true)" /></label>
@@ -99,9 +99,17 @@
         return LoadAsync();
     }
 
+    private int load;
+
+    /// <summary>Loads for the current filters; a slower answer for filters picked earlier is dropped.</summary>
     private async Task LoadAsync()
     {
+        var mine = ++load;
         var result = await Api.TracesAsync(from, to);
+        if (mine != load)
+        {
+            return;
+        }
         error = result.Problem?.Message;
         traces = result.Value;
     }
@@ -128,6 +136,11 @@
         open = trace;
         steps = null;
         var result = await Api.TraceAsync(trace.ConversationId);
+        if (open != trace)
+        {
+            // Another conversation was opened while this one loaded.
+            return;
+        }
         error = result.Problem?.Message;
         steps = result.Value ?? [];
     }
@@ -137,7 +150,8 @@
         StepKind.UserMessage => "User message",
         StepKind.ModelCall => "Model call",
         StepKind.ToolCall => "Tool call",
-        _ => "Reply",
+        StepKind.Reply => "Reply",
+        _ => kind.ToString(),
     };
 
     private static string Cost(TraceStep s)

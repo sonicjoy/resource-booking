@@ -25,6 +25,9 @@ public sealed class StubChatClient : IChatClient
     /// <summary>Every message list the model was sent, in order.</summary>
     public List<List<ChatMessage>> Calls { get; } = [];
 
+    /// <summary>The options each call was sent with, in order.</summary>
+    public List<ChatOptions?> Options { get; } = [];
+
     public sealed record ToolCall(string Name, object Arguments);
 
     public sealed record Script(IReadOnlyList<ToolCall> Calls, string Reply);
@@ -42,6 +45,7 @@ public sealed class StubChatClient : IChatClient
     {
         var list = messages.ToList();
         Calls.Add(list);
+        Options.Add(options);
         if (Delay > TimeSpan.Zero)
         {
             await Task.Delay(Delay, cancellationToken);

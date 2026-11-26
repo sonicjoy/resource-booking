@@ -10,7 +10,7 @@
         <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="NewConversation">New conversation</FluentButton>
         <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="OnClose">Close</FluentButton>
     </div>
-    <p class="hint">Ask in your own words, for example "a room for 8 tomorrow morning". It proposes; nothing is booked until you confirm.</p>
+    <p class="hint">Ask in your own words, for example "a room for 8 tomorrow morning". It proposes; nothing is booked until you confirm. Conversations are recorded, and admins can read them.</p>
 
     <ol class="messages" aria-live="polite">
         @foreach (var message in messages)
@@ -124,6 +124,9 @@
             }
             var failed = result.Problem!;
             problem = failed.Message;
+            // The server may have superseded the last turn's proposals before failing: don't offer them again.
+            proposals = [];
+            askingToCancel = null;
             if (failed.Status == 404)
             {
                 // The conversation is gone (the data was reset): the next message starts a new one.

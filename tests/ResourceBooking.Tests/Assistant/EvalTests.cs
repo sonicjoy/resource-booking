@@ -32,8 +32,8 @@ public class EvalTests(DbFixture fixture)
     {
         Assert.SkipWhen(string.IsNullOrEmpty(Environment.GetEnvironmentVariable("OpenAI__ApiKey")),
             "Set OpenAI__ApiKey to run the evals against the real model.");
-        var evalCase = File.Value.Cases.Single(c => c.Name == name);
-        await using var app = await ApiFactory.CreateAsync(fixture, realModel: true,
+        var evalCase = Load(name);
+        await using var app = await ApiFactory.CreateAsync(fixture, now: File.Value.Now, realModel: true,
             settings: new Dictionary<string, string> { ["Assistant:MessagesPerMinute"] = "0" });
         await RunAsync(evalCase, app);
     }
@@ -117,7 +117,7 @@ public class EvalTests(DbFixture fixture)
     private static string Describe(AssistantReply reply) =>
         reply.Proposals.Count == 0 ? $"none (\"{reply.Text}\")" : string.Join("; ", reply.Proposals.Select(p => $"{p.Kind} {p.Summary}"));
 
-    internal sealed record EvalFile(List<EvalCase> Cases);
+    internal sealed record EvalFile(DateTimeOffset Now, List<EvalCase> Cases);
 
     internal sealed record EvalCase(string Name, string User, List<Turn> Turns);
 

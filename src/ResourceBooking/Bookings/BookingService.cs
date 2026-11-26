@@ -136,39 +136,26 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         }
         if (!await db.Users.AnyAsync(u => u.Id == callerId && u.IsActive, ct))
         {
-            return new ApiError(StatusCodes.Status401Unauthorized, "INACTIVE", "Your account is no longer active");
+            return SignedOut;
         }
         var now = clock.GetUtcNow();
         var bookingId = existingId ?? Guid.Empty;
         if (existingId is { } id)
         {
-            var existing = await db.Bookings.AsNoTracking().SingleOrDefaultAsync(b => b.Id == id && b.UserId == callerId, ct);
-            if (existing is null)
+            var existing = await db.Bookings.AsNoTracking().SingleOrDefaultAsync(b => b.Id == id, ct);
+            if (OwnBookingError(existing, callerId) is { } notYours)
             {
-                return ApiError.NotFound("No such booking");
+                return notYours;
             }
-            if (existing.Status != BookingStatus.Confirmed)
-            {
-                return new ApiError(StatusCodes.Status409Conflict, "NOT_CONFIRMED", "That booking is already cancelled");
-            }
-            if ((existing.DeliveryAt ?? existing.StartsAt) <= now)
-            {
-                return new ApiError(StatusCodes.Status422UnprocessableEntity, "ALREADY_STARTED", "That booking has already started");
-            }
-            if (existing.ResourceId != resource.Id)
+            if (existing!.ResourceId != resource.Id)
             {
                 return ApiError.BadRequest("A booking can't move to another resource; cancel it and book again");
             }
         }
 
-        var context = new RuleContext(
-            await db.Bookings.CountAsync(b => b.UserId == callerId && b.ResourceId == resource.Id
-                && b.Status == BookingStatus.Confirmed && b.EndsAt > now && b.Id != bookingId, ct),
-            resource.Type == ResourceType.Catering ? await FreeUnitAsync(resource, candidate.Start, bookingId, ct) : null);
-        var violations = BookingRules.Check(candidate, resource, context, now, zone);
-        if (violations.Count > 0)
+        if ((await RulesAsync(candidate, resource, callerId, bookingId, now, ct)).Error is { } broken)
         {
-            return new ApiError(StatusCodes.Status422UnprocessableEntity, "RULES", "The booking breaks a rule", violations);
+            return broken;
         }
         if (resource.Type != ResourceType.Catering)
         {
@@ -241,15 +228,10 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         }
 
         var now = clock.GetUtcNow();
-        var context = new RuleContext(
-            await db.Bookings.CountAsync(b => b.UserId == callerId && b.ResourceId == resource.Id
-                && b.Status == BookingStatus.Confirmed && b.EndsAt > now && b.Id != booking.Id, ct),
-            resource.Type == ResourceType.Catering ? await FreeUnitAsync(resource, candidate.Start, booking.Id, ct) : null);
-
-        var violations = BookingRules.Check(candidate, resource, context, now, zone);
-        if (violations.Count > 0)
+        var (context, rulesError) = await RulesAsync(candidate, resource, callerId, booking.Id, now, ct);
+        if (rulesError is not null)
         {
-            return new ApiError(StatusCodes.Status422UnprocessableEntity, "RULES", "The booking breaks a rule", violations);
+            return rulesError;
         }
 
         booking.StartsAt = candidate.Start;
@@ -323,12 +305,14 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
     {
         var active = await db.Users.FromSql($"SELECT * FROM users WHERE id = {callerId} FOR SHARE")
             .Select(u => u.IsActive).SingleOrDefaultAsync(ct);
-        return active ? null : new ApiError(StatusCodes.Status401Unauthorized, "SIGNED_OUT", "Sign in again");
+        return active ? null : SignedOut;
     }
 
-    private async Task<BookingResult> LockOwnBookingAsync(Guid id, Guid callerId, CancellationToken ct)
+    private static readonly ApiError SignedOut = new(StatusCodes.Status401Unauthorized, "SIGNED_OUT", "Sign in again");
+
+    /// <summary>Whether a booking can be changed or cancelled by the caller; shared by booking and the assistant's preview.</summary>
+    private ApiError? OwnBookingError(Booking? booking, Guid callerId)
     {
-        var booking = await db.Bookings.FromSql($"SELECT * FROM bookings WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(ct);
         if (booking is null || booking.UserId != callerId)
         {
             return ApiError.NotFound("No such booking");
@@ -337,11 +321,29 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         {
             return new ApiError(StatusCodes.Status409Conflict, "NOT_CONFIRMED", "That booking is already cancelled");
         }
-        if ((booking.DeliveryAt ?? booking.StartsAt) <= clock.GetUtcNow())
-        {
-            return new ApiError(StatusCodes.Status422UnprocessableEntity, "ALREADY_STARTED", "That booking has already started");
-        }
-        return booking;
+        return (booking.DeliveryAt ?? booking.StartsAt) <= clock.GetUtcNow()
+            ? new ApiError(StatusCodes.Status422UnprocessableEntity, "ALREADY_STARTED", "That booking has already started")
+            : null;
+    }
+
+    /// <summary>The rule context and the rules' verdict; shared by booking and the assistant's preview so they can't drift.</summary>
+    private async Task<(RuleContext Context, ApiError? Error)> RulesAsync(BookingCandidate candidate, Resource resource, Guid callerId,
+        Guid bookingId, DateTimeOffset now, CancellationToken ct)
+    {
+        var context = new RuleContext(
+            await db.Bookings.CountAsync(b => b.UserId == callerId && b.ResourceId == resource.Id
+                && b.Status == BookingStatus.Confirmed && b.EndsAt > now && b.Id != bookingId, ct),
+            resource.Type == ResourceType.Catering ? await FreeUnitAsync(resource, candidate.Start, bookingId, ct) : null);
+        var violations = BookingRules.Check(candidate, resource, context, now, zone);
+        return (context, violations.Count > 0
+            ? new ApiError(StatusCodes.Status422UnprocessableEntity, "RULES", "The booking breaks a rule", violations)
+            : null);
+    }
+
+    private async Task<BookingResult> LockOwnBookingAsync(Guid id, Guid callerId, CancellationToken ct)
+    {
+        var booking = await db.Bookings.FromSql($"SELECT * FROM bookings WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(ct);
+        return OwnBookingError(booking, callerId) is { } error ? error : booking!;
     }
 
     /// <summary>

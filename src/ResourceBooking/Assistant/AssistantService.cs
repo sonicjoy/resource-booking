@@ -56,9 +56,10 @@ public sealed class AssistantService(
         messages.Add(new ChatMessage(ChatRole.User, request.Text));
 
         var tools = new AssistantTools(db, bookings, availability, clock, zone, userId, conversationId, turn);
-        using var client = new ChatClientBuilder(model)
+        // Not disposed: the pipeline wraps the app's singleton model, which outlives this request.
+        var client = new ChatClientBuilder(model)
             .UseFunctionInvocation(configure: f => f.MaximumIterationsPerRequest = settings.MaxIterations)
-            .Use(inner => new TracingChatClient(inner, trace, budget))
+            .Use(inner => new TracingChatClient(inner, trace, budget, settings.MaxOutputTokens, seen: messages.Count - 1))
             .Build();
 
         string text;

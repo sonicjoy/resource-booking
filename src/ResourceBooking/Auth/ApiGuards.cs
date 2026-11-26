@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace ResourceBooking.Auth;
 
@@ -26,10 +27,10 @@ public static class ApiGuards
                         QueueLimit = 0,
                     });
             });
-            // Per signed-in user: Assistant:MessagesPerMinute (default 10); 0 turns it off.
+            // Per signed-in user: Assistant:MessagesPerMinute; 0 turns it off.
             options.AddPolicy(AssistantLimit, context =>
             {
-                var perMinute = context.RequestServices.GetRequiredService<IConfiguration>().GetValue("Assistant:MessagesPerMinute", 10);
+                var perMinute = context.RequestServices.GetRequiredService<IOptions<Assistant.AssistantOptions>>().Value.MessagesPerMinute;
                 var user = context.User.UserId()?.ToString() ?? "anonymous";
                 return perMinute <= 0
                     ? RateLimitPartition.GetNoLimiter(user)

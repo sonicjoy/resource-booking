@@ -326,23 +326,8 @@ else
             dayError = "That resource can't be booked any more. Ask the assistant again.";
             return;
         }
-        var at = request.DeliveryAt ?? request.Start!.Value;
         saved = null;
-        draft = new BookingDraft
-        {
-            BookingId = proposal.Kind == ProposalKind.Change ? proposal.BookingId : null,
-            ProposalId = proposal.Id,
-            ResourceId = resource.Id,
-            ResourceName = resource.Name,
-            Type = resource.Type,
-            Date = DateOnly.FromDateTime(at),
-            EndDate = DateOnly.FromDateTime(request.End ?? at),
-            Start = TimeOnly.FromDateTime(at),
-            End = request.End is { } end ? TimeOnly.FromDateTime(end) : default,
-            Attendees = request.Attendees,
-            Title = request.Title,
-            DeliveryRoomId = request.DeliveryRoomId,
-        };
+        draft = BookingDraft.From(proposal, resource);
         if (draft.Date != date)
         {
             date = draft.Date;

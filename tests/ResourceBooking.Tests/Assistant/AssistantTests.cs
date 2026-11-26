@@ -189,7 +189,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         await using (var db = _app.Db())
         {
             var seq = await db.AssistantSteps.Where(s => s.ConversationId == conversation).MaxAsync(s => s.Seq, Ct);
-            db.AssistantSteps.AddRange(Enumerable.Range(1, 19).Select(i => new AssistantStep
+            db.AssistantSteps.AddRange(Enumerable.Range(1, 18).Select(i => new AssistantStep
             {
                 Id = Guid.CreateVersion7(),
                 ConversationId = conversation,
@@ -202,6 +202,7 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
             await db.SaveChangesAsync(Ct);
         }
 
+        Assert.Equal(HttpStatusCode.OK, (await SayAsync(ana, "the twentieth", conversation)).StatusCode);
         var response = await SayAsync(ana, "one more", conversation);
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
@@ -347,8 +348,9 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         await using var db = _app.Db();
         var tools = await db.AssistantSteps.CountAsync(s => s.Kind == StepKind.ToolCall, Ct);
-        Assert.InRange(tools, 1, 5);
-        Assert.InRange(_app.Model.Calls.Count, 2, 6);
+        Assert.Equal(5, tools);
+        // Five rounds of tool calls, then one last call with tools turned off for the answer.
+        Assert.Equal(6, _app.Model.Calls.Count);
     }
 
     [Theory]
@@ -364,6 +366,110 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
 
         Assert.Equal(expected, response.StatusCode);
         Assert.Equal(expected == HttpStatusCode.OK ? 1 : 0, _app.Model.Calls.Count);
+    }
+
+    [Fact]
+    public async Task The_budget_is_checked_before_every_model_call_not_only_each_message()
+    {
+        await using var app = await ApiFactory.CreateAsync(fixture, settings: new Dictionary<string, string> { ["Assistant:DailyTokenBudget"] = "150" });
+        app.Model.TokensPerCall = 200;
+        app.Model.On("a room", "Done.", ProposeRoom(Seed.ThamesId, "14:00", "15:00", 6));
+        var ana = await app.SignedInAsync(Seed.AnaId);
+
+        // The first call fits (0 used), spends 200; the second call of the same message finds the budget spent.
+        var response = await ana.PostAsJsonAsync("/api/assistant/messages", new { text = "a room please" }, Ct);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal("BUDGET_EXHAUSTED", await CodeAsync(response));
+        Assert.Single(app.Model.Calls);
+        await using var db = app.Db();
+        Assert.Equal(200, (await db.TokenUsage.SingleAsync(Ct)).Tokens);
+    }
+
+    [Fact]
+    public async Task A_call_that_times_out_still_counts_against_the_budget()
+    {
+        await using var app = await ApiFactory.CreateAsync(fixture, settings: new Dictionary<string, string> { ["Assistant:TimeoutSeconds"] = "1" });
+        app.Model.Delay = TimeSpan.FromSeconds(5);
+        var ana = await app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await ana.PostAsJsonAsync("/api/assistant/messages", new { text = "hello" }, Ct));
+
+        // The reservation (an input estimate plus the 800-token output cap) is kept: nothing reported the real usage.
+        await using var db = app.Db();
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 800);
+    }
+
+    [Fact]
+    public async Task Each_call_asks_for_at_most_the_output_cap()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "hello"));
+
+        Assert.Equal(800, _app.Model.Options.Single()?.MaxOutputTokens);
+    }
+
+    [Fact]
+    public async Task A_time_the_model_writes_without_a_date_is_refused_not_ignored()
+    {
+        Guid severn;
+        await using (var db = _app.Db())
+        {
+            severn = await db.Bookings.Where(b => b.UserId == Seed.AnaId && b.ResourceId == Seed.SevernId).Select(b => b.Id).SingleAsync(Ct);
+        }
+        _app.Model.On("move", "Sorry.", Call("propose_change", new { bookingId = severn, start = "15:00", end = "16:00" }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "move my Severn booking to 3pm"));
+
+        Assert.Empty(reply.Proposals);
+        await using var check = _app.Db();
+        Assert.Contains("isn't a London date and time", (await check.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload);
+    }
+
+    [Fact]
+    public async Task Find_free_resources_lists_rooms_that_seat_the_group_and_are_free()
+    {
+        _app.Model.On("free", "Severn.", Call("find_free_resources", new { type = "MeetingRoom", start = "2026-11-27T09:00", end = "2026-11-27T10:00", attendees = 4 }));
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        await ReplyAsync(await SayAsync(ana, "what's free friday at 9?"));
+
+        // Ben has Thames from 09:00 on Friday 27 November, so only Severn is free.
+        await using var db = _app.Db();
+        var payload = (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.ToolCall, Ct)).Payload;
+        Assert.Contains("Severn", payload);
+        Assert.DoesNotContain("Thames", payload);
+    }
+
+    [Fact]
+    public async Task A_message_with_a_NUL_character_is_traced_and_answered()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var reply = await ReplyAsync(await SayAsync(ana, "hello\0there"));
+
+        Assert.False(string.IsNullOrEmpty(reply.Text));
+        await using var db = _app.Db();
+        Assert.Contains("hello�there", (await db.AssistantSteps.SingleAsync(s => s.Kind == StepKind.UserMessage, Ct)).Payload);
+    }
+
+    [Fact]
+    public async Task Two_messages_sent_at_once_to_one_conversation_are_both_answered_and_traced()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        var conversation = (await ReplyAsync(await SayAsync(ana, "hello"))).ConversationId;
+        _app.Model.Delay = TimeSpan.FromMilliseconds(200);
+
+        var both = await Task.WhenAll(SayAsync(ana, "first", conversation), SayAsync(ana, "second", conversation));
+
+        Assert.All(both, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        await using var db = _app.Db();
+        var steps = await db.AssistantSteps.Where(s => s.ConversationId == conversation).OrderBy(s => s.Seq).ToListAsync(Ct);
+        Assert.Equal(3, steps.Count(s => s.Kind == StepKind.UserMessage));
+        Assert.Equal(3, steps.Count(s => s.Kind == StepKind.Reply));
+        Assert.Equal(steps.Select(s => s.Seq).Distinct().Count(), steps.Count);
     }
 
     // ---- level 3: a proposal is offered exactly when the same request would book ----

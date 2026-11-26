@@ -12,7 +12,14 @@ public sealed class AssistantOptions
     /// <summary>How long one message may take before the assistant gives up on the model.</summary>
     public int TimeoutSeconds { get; set; } = 30;
 
+    /// <summary>User messages one conversation may hold; the next is 422 TURN_LIMIT.</summary>
     public int MaxTurns { get; set; } = 20;
+
+    /// <summary>
+    /// The most tokens one model call may write. Each call reserves its input estimate plus this from the budget
+    /// before it starts, so a call that times out or is abandoned still counts.
+    /// </summary>
+    public int MaxOutputTokens { get; set; } = 800;
 
     /// <summary>Model calls per message, counting each round of tool calls.</summary>
     public int MaxIterations { get; set; } = 5;

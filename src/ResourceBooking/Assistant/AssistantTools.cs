@@ -69,6 +69,10 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     public async Task<string> ProposeBookingAsync(Guid resourceId, int attendees, string? start = null, string? end = null,
         string? title = null, string? deliveryAt = null, Guid? deliveryRoomId = null, CancellationToken ct = default)
     {
+        if (Unreadable(start, end, deliveryAt) is { } refusal)
+        {
+            return refusal;
+        }
         var request = new BookingRequest
         {
             ResourceId = resourceId,
@@ -86,6 +90,10 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     public async Task<string> ProposeChangeAsync(Guid bookingId, string? start = null, string? end = null, int? attendees = null,
         string? title = null, string? deliveryAt = null, Guid? deliveryRoomId = null, CancellationToken ct = default)
     {
+        if (Unreadable(start, end, deliveryAt) is { } refusal)
+        {
+            return refusal;
+        }
         var booking = await db.Bookings.AsNoTracking().SingleOrDefaultAsync(b => b.Id == bookingId && b.UserId == userId, ct);
         if (booking is null)
         {
@@ -173,8 +181,17 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
     private string CancelSummary(Booking booking) =>
         $"Cancel {booking.Resource!.Name}, {Text(CompanyTime.ToLocal(booking.DeliveryAt ?? booking.StartsAt, zone))}";
 
+    private static readonly string[] Formats = ["yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm"];
+
+    /// <summary>A London wall-clock date and time as the model writes it; anything else (a time with no date, an offset) is null.</summary>
     private static DateTime? Local(string? text) =>
-        DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t) ? t : null;
+        DateTime.TryParseExact(text?.Trim(), Formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var t) ? t : null;
+
+    /// <summary>A refusal naming the first time given that isn't a full date and time, so it isn't silently ignored.</summary>
+    private static string? Unreadable(params string?[] times) =>
+        times.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t) && Local(t) is null) is { } bad
+            ? $"Not proposed: \"{bad}\" isn't a London date and time; write it like 2026-11-26T09:00."
+            : null;
 
     private static string Text(DateTime t) => t.ToString("ddd d MMM yyyy HH:mm", CultureInfo.InvariantCulture);
 }
