@@ -51,6 +51,7 @@ None. Platform assumptions that are not yet verified are listed under Risks & Mi
 **Seed data.** Every CUJ starts from a fresh seed, with dates relative to today in Europe/London.
 
 * **People:** Ana and Ben (employees; Ben has two future bookings) and Sam (admin), all on `sonicjoy-solutions.com`.
+* **Every resource:** bookable up to 90 days ahead; rooms and the car for 15 minutes at least.
 * **Thames:** meeting room, 8 seats, open 08:00 to 18:00, 4 hours at most.
 * **Severn:** meeting room, 12 seats, open 08:00 to 18:00, with a booking by Ana in three days.
 * **Pool Car 1:** car, 4 seats, open 07:00 to 19:00, 60-minute turnaround, booked tomorrow from 09:00 to 11:00.

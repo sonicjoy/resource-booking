@@ -5,16 +5,21 @@ public static class CompanyTime
 {
     /// <summary>
     /// A company-local wall-clock time as UTC, or null when it can't be one: it carries an offset
-    /// (the API takes local times only), or the clock change skips it or passes it twice.
+    /// (the API takes local times only), the clock change skips it or passes it twice, it is finer than the
+    /// database's microseconds, or it is too near the end of the calendar for a day or a gap to be added.
     /// </summary>
     public static DateTimeOffset? ToUtc(DateTime local, TimeZoneInfo zone)
     {
-        if (local.Kind != DateTimeKind.Unspecified || zone.IsInvalidTime(local) || zone.IsAmbiguousTime(local))
+        if (local.Kind != DateTimeKind.Unspecified || local.Ticks % 10 != 0 || !InRange(DateOnly.FromDateTime(local))
+            || zone.IsInvalidTime(local) || zone.IsAmbiguousTime(local))
         {
             return null;
         }
         return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, zone));
     }
+
+    /// <summary>False for the calendar's last year, where adding a day or a turnaround gap would overflow.</summary>
+    public static bool InRange(DateOnly day) => day.Year < 9999;
 
     public static DateTime ToLocal(DateTimeOffset instant, TimeZoneInfo zone) =>
         DateTime.SpecifyKind(TimeZoneInfo.ConvertTime(instant, zone).DateTime, DateTimeKind.Unspecified);

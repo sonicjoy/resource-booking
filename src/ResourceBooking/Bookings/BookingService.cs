@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -80,7 +81,7 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
             .Include(b => b.Resource)
             .Include(b => b.User)
             .Where(filter)
-            .Where(b => b.Status == BookingStatus.Confirmed && b.StartsAt > now)
+            .Where(b => b.Status == BookingStatus.Confirmed && (b.DeliveryAt ?? b.StartsAt) > now)
             .ToListAsync(ct);
 
         foreach (var booking in bookings)
@@ -95,7 +96,8 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
                     Id = Guid.CreateVersion7(),
                     UserId = owner.Id,
                     BookingId = booking.Id,
-                    Message = $"Your booking of {booking.Resource!.Name} on {when:d MMM yyyy 'at' HH:mm} was cancelled: {reason}",
+                    Message = string.Create(CultureInfo.InvariantCulture,
+                        $"Your booking of {booking.Resource!.Name} on {when:d MMM yyyy 'at' HH:mm} was cancelled: {reason}"),
                     CreatedAt = now,
                 });
             }
@@ -276,7 +278,8 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         {
             return;
         }
-        var proposal = await db.Proposals.SingleOrDefaultAsync(p => p.Id == id, ct);
+        // Locked, so two bookings sent with the same proposal can't both confirm it.
+        var proposal = await db.Proposals.FromSql($"SELECT * FROM proposals WHERE id = {id} FOR UPDATE").SingleOrDefaultAsync(ct);
         var fresh = proposal is not null && clock.GetUtcNow() - proposal.CreatedAt < TimeSpan.FromHours(24);
         var rightTarget = kind == ProposalKind.Create || proposal?.BookingId == booking.Id;
         if (proposal is null || proposal.UserId != callerId || proposal.Status != ProposalStatus.Open || !fresh
@@ -292,12 +295,26 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         }
         if (request is not null)
         {
-            var proposed = JsonSerializer.Deserialize<BookingRequest>(proposal.Payload, JsonSerializerOptions.Web);
-            proposal.ChangedBeforeConfirm = proposed is null
-                || (proposed.ResourceId, proposed.Start, proposed.End, proposed.Attendees, proposed.DeliveryAt, proposed.DeliveryRoomId)
-                != (request.ResourceId, request.Start, request.End, request.Attendees, request.DeliveryAt, request.DeliveryRoomId);
+            proposal.ChangedBeforeConfirm = Proposed(proposal.Payload) is not { } proposed || !Equals(Submitted(proposed), Submitted(request));
         }
     }
+
+    private static BookingRequest? Proposed(string payload)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<BookingRequest>(payload, JsonSerializerOptions.Web);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The values a booking keeps from a request: a catering order's start and end come from its delivery day.</summary>
+    private static object Submitted(BookingRequest r) => r.DeliveryAt is null
+        ? (r.ResourceId, r.Start, r.End, r.Attendees, r.Title, (DateTime?)null, (Guid?)null)
+        : (r.ResourceId, (DateTime?)null, (DateTime?)null, r.Attendees, r.Title, r.DeliveryAt, r.DeliveryRoomId);
 
     /// <summary>The gap a resource needs between bookings; only types whose rule fields include it have one.</summary>
     public static TimeSpan Turnaround(Resource resource) =>

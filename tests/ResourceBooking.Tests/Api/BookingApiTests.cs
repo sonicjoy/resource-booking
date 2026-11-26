@@ -101,6 +101,10 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000101","start":"2026-11-26T14:00","end":"2026-11-26T15:00","deliveryAt":"2026-11-26T14:00","attendees":2}""")]
     [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000104","start":"2026-11-26T12:00","end":"2026-11-26T13:00","attendees":2}""")]
     [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000101","start":"2026-11-26T14:00","end":"2026-11-26T15:00","attendees":0}""")]
+    [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000101","start":"2026-11-26T14:00:00.0000001","end":"2026-11-26T14:00:00.0000002","attendees":2}""")]
+    [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000103","start":"9999-12-31T22:00","end":"9999-12-31T23:30","attendees":2}""")]
+    [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000104","deliveryAt":"9999-12-31T12:00","deliveryRoomId":"0193a000-0000-7000-8000-000000000101","attendees":2}""")]
+    [InlineData("""{"resourceId":"0193a000-0000-7000-8000-000000000104","deliveryAt":"2026-11-26T12:00","attendees":2}""")]
     public async Task Malformed_or_misshapen_requests_are_400(string json)
     {
         var ana = await _app.SignedInAsync(Seed.AnaId);
@@ -121,6 +125,50 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
             new { resourceId = Seed.PoolCar1Id, start = "2027-03-28T01:30", end = "2027-03-28T09:00", attendees = 1 }, Ct);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/api/availability?date=9999-12-31&type=MeetingRoom")]
+    [InlineData("/api/resources/free?type=Car&start=9999-12-31T22:00&end=9999-12-31T23:30&attendees=1")]
+    public async Task Reads_at_the_end_of_the_calendar_are_400(string url)
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await ana.GetAsync(url, Ct)).StatusCode);
+    }
+
+    public static TheoryData<string, string> RuleCases => new()
+    {
+        { "IN_PAST", "past" },
+        { "TOO_FAR_AHEAD", "far" },
+        { "TOO_SHORT", "short" },
+        { "RESOURCE_RETIRED", "retired" },
+    };
+
+    [Theory]
+    [MemberData(nameof(RuleCases))]
+    public async Task Each_seeded_rule_is_refused_with_its_code(string code, string which)
+    {
+        if (which == "retired")
+        {
+            await using var db = _app.Db();
+            var severn = await db.Resources.SingleAsync(r => r.Id == Seed.SevernId, Ct);
+            severn.LastDay = new DateOnly(2026, 11, 25);
+            await db.SaveChangesAsync(Ct);
+        }
+        var (start, end) = which switch
+        {
+            "past" => ("2026-11-24T10:00", "2026-11-24T11:00"),
+            "far" => ("2027-03-01T10:00", "2027-03-01T11:00"),
+            "short" => ($"{Tomorrow}T10:00", $"{Tomorrow}T10:05"),
+            _ => ($"{Tomorrow}T10:00", $"{Tomorrow}T11:00"),
+        };
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var response = await ana.PostAsJsonAsync("/api/bookings", new { resourceId = Seed.SevernId, start, end, attendees = 2 }, Ct);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Contains(code, (await Body(response)).GetProperty("violations").EnumerateArray().Select(v => v.GetProperty("code").GetString()));
     }
 
     [Fact]
@@ -192,6 +240,40 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
             System.Text.Encoding.UTF8, "application/json"), Ct);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_kitchen_unit_sent_by_the_client_is_replaced_by_the_free_one()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+
+        var response = await ana.PostAsync("/api/bookings", new StringContent(
+            $$"""{"resourceId":"{{Seed.MainKitchenId}}","deliveryAt":"{{Tomorrow}}T12:30","deliveryRoomId":"{{Seed.ThamesId}}","attendees":8,"unitNo":7}""",
+            System.Text.Encoding.UTF8, "application/json"), Ct);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var id = (await response.Content.ReadFromJsonAsync<BookingDto>(Ct))!.Id;
+        await using var db = _app.Db();
+        Assert.Equal(0, (await db.Bookings.SingleAsync(b => b.Id == id, Ct)).UnitNo);
+    }
+
+    [Fact]
+    public async Task Editing_an_order_in_a_full_kitchen_keeps_its_unit()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        var ids = new List<Guid>();
+        for (var i = 0; i < 5; i++)
+        {
+            var created = await ana.PostAsJsonAsync("/api/bookings", Lunch("12:30"), Ct);
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            ids.Add((await created.Content.ReadFromJsonAsync<BookingDto>(Ct))!.Id);
+        }
+
+        var response = await ana.PutAsJsonAsync($"/api/bookings/{ids[2]}", Lunch("13:00", portions: 10), Ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await using var db = _app.Db();
+        Assert.Equal(2, (await db.Bookings.SingleAsync(b => b.Id == ids[2], Ct)).UnitNo);
     }
 
     [Fact]
@@ -313,16 +395,22 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     public async Task A_booking_that_has_started_cannot_be_changed_or_cancelled()
     {
         var ana = await _app.SignedInAsync(Seed.AnaId);
-        Guid pastId;
+        Guid pastId, resourceId;
         await using (var db = _app.Db())
         {
-            pastId = await db.Bookings.Where(b => b.UserId == Seed.AnaId && b.EndsAt < _app.Clock.GetUtcNow()).Select(b => b.Id).FirstAsync(Ct);
+            var past = await db.Bookings
+                .FirstAsync(b => b.UserId == Seed.AnaId && b.DeliveryAt == null && b.EndsAt < _app.Clock.GetUtcNow(), Ct);
+            (pastId, resourceId) = (past.Id, past.ResourceId);
         }
 
-        var response = await ana.DeleteAsync($"/api/bookings/{pastId}", Ct);
+        var cancel = await ana.DeleteAsync($"/api/bookings/{pastId}", Ct);
+        var edit = await ana.PutAsJsonAsync($"/api/bookings/{pastId}", Room(resourceId, "14:00", "15:00", attendees: 2), Ct);
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
-        Assert.Equal("ALREADY_STARTED", (await Body(response)).GetProperty("code").GetString());
+        foreach (var response in new[] { cancel, edit })
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            Assert.Equal("ALREADY_STARTED", (await Body(response)).GetProperty("code").GetString());
+        }
     }
 
     [Fact]
@@ -401,7 +489,7 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     // ---- proposals ----
 
     private async Task<Guid> ProposalAsync(Guid owner, ProposalKind kind = ProposalKind.Create, ProposalStatus status = ProposalStatus.Open,
-        TimeSpan? age = null, int attendees = 6)
+        TimeSpan? age = null, int attendees = 6, Guid? bookingId = null, string? payload = null)
     {
         var id = Guid.CreateVersion7();
         await using var db = _app.Db();
@@ -412,7 +500,8 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
             UserId = owner,
             Turn = 1,
             Kind = kind,
-            Payload = JsonSerializer.Serialize(new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees }),
+            BookingId = bookingId,
+            Payload = payload ?? JsonSerializer.Serialize(new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees }),
             Status = status,
             CreatedAt = _app.Clock.GetUtcNow() - (age ?? TimeSpan.FromMinutes(5)),
         });
@@ -420,10 +509,10 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
         return id;
     }
 
-    private async Task<(Booking Booking, Proposal Proposal)> BookWithProposalAsync(Guid proposalId, int attendees = 6)
+    private async Task<(Booking Booking, Proposal Proposal)> BookWithProposalAsync(Guid proposalId, int attendees = 6, string? title = null, object? request = null)
     {
         var ana = await _app.SignedInAsync(Seed.AnaId);
-        var request = new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees, proposalId };
+        request ??= new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T14:00", end = $"{Tomorrow}T15:00", attendees, title, proposalId };
         var response = await ana.PostAsJsonAsync("/api/bookings", request, Ct);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var id = (await response.Content.ReadFromJsonAsync<BookingDto>(Ct))!.Id;
@@ -446,6 +535,84 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
         var (_, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), attendees: 7);
 
         Assert.True(proposal.ChangedBeforeConfirm);
+    }
+
+    [Fact]
+    public async Task Changing_only_the_title_before_confirming_is_recorded()
+    {
+        var (_, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId), title: "Renamed");
+
+        Assert.True(proposal.ChangedBeforeConfirm);
+    }
+
+    [Fact]
+    public async Task A_catering_proposal_ignores_the_start_and_end_the_server_discards()
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            resourceId = Seed.MainKitchenId,
+            deliveryAt = $"{Tomorrow}T12:30",
+            deliveryRoomId = Seed.ThamesId,
+            attendees = 8,
+            start = $"{Tomorrow}T00:00",
+            end = $"{Tomorrow}T23:59",
+        });
+        var proposalId = await ProposalAsync(Seed.AnaId, payload: payload);
+        var request = new { resourceId = Seed.MainKitchenId, deliveryAt = $"{Tomorrow}T12:30", deliveryRoomId = Seed.ThamesId, attendees = 8, proposalId };
+
+        var (booking, proposal) = await BookWithProposalAsync(proposalId, request: request);
+
+        Assert.Equal(proposal.Id, booking.ProposalId);
+        Assert.False(proposal.ChangedBeforeConfirm);
+    }
+
+    [Fact]
+    public async Task A_proposal_with_an_unreadable_payload_still_books_and_counts_as_changed()
+    {
+        var (booking, proposal) = await BookWithProposalAsync(await ProposalAsync(Seed.AnaId, payload: """{"start":"soon"}"""));
+
+        Assert.Equal(proposal.Id, booking.ProposalId);
+        Assert.True(proposal.ChangedBeforeConfirm);
+    }
+
+    [Fact]
+    public async Task One_proposal_sent_with_concurrent_bookings_links_only_one_of_them()
+    {
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        foreach (var hour in new[] { 8, 10, 12, 14, 16 })
+        {
+            var proposalId = await ProposalAsync(Seed.AnaId);
+            var responses = await Task.WhenAll(new[] { Seed.ThamesId, Seed.SevernId }.Select(resourceId => ana.PostAsJsonAsync("/api/bookings",
+                new { resourceId, start = $"{Tomorrow}T{hour:00}:00", end = $"{Tomorrow}T{hour:00}:45", attendees = 2, proposalId }, Ct)));
+
+            Assert.All(responses, r => Assert.Equal(HttpStatusCode.Created, r.StatusCode));
+            await using var db = _app.Db();
+            Assert.Equal(1, await db.Bookings.CountAsync(b => b.ProposalId == proposalId, Ct));
+        }
+    }
+
+    [Theory]
+    [InlineData("cancel", true)]
+    [InlineData("cancel", false)]
+    [InlineData("change", true)]
+    [InlineData("change", false)]
+    public async Task A_change_or_cancel_proposal_links_only_to_the_booking_it_names(string verb, bool named)
+    {
+        var (ana, booking) = await AnaBooksThamesAsync();
+        var other = await ana.PostAsJsonAsync("/api/bookings", Room(Seed.SevernId, "10:00", "11:00"), Ct);
+        var otherId = (await other.Content.ReadFromJsonAsync<BookingDto>(Ct))!.Id;
+        var kind = verb == "cancel" ? ProposalKind.Cancel : ProposalKind.Change;
+        var proposalId = await ProposalAsync(Seed.AnaId, kind: kind, bookingId: named ? booking.Id : otherId);
+
+        var response = verb == "cancel"
+            ? await ana.DeleteAsync($"/api/bookings/{booking.Id}?proposalId={proposalId}", Ct)
+            : await ana.PutAsJsonAsync($"/api/bookings/{booking.Id}",
+                new { resourceId = Seed.ThamesId, start = $"{Tomorrow}T15:00", end = $"{Tomorrow}T16:00", attendees = 6, proposalId }, Ct);
+
+        Assert.True(response.IsSuccessStatusCode, response.StatusCode.ToString());
+        await using var db = _app.Db();
+        var status = (await db.Proposals.SingleAsync(p => p.Id == proposalId, Ct)).Status;
+        Assert.Equal(named ? ProposalStatus.Confirmed : ProposalStatus.Open, status);
     }
 
     public static TheoryData<string> Unlinkable => ["someone else's", "superseded", "expired", "wrong kind"];
@@ -471,26 +638,36 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
     // ---- notices and cascades ----
 
     /// <summary>Runs a cascade as the signed-in admin would: inside a request scope with Sam as the user.</summary>
-    private async Task CancelBensFutureBookingsAsSamAsync()
+    private async Task<int> CancelBensFutureBookingsAsSamAsync(Guid? actorId = null)
     {
         await using var scope = _app.Services.CreateAsyncScope();
         var sam = new User { Id = Seed.SamId, Email = "sam@sonicjoy-solutions.com", DisplayName = "Sam", Role = Role.Admin, IsActive = true };
         scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext =
             new DefaultHttpContext { User = CookieSetup.PrincipalFor(sam), RequestServices = scope.ServiceProvider };
         var cancelled = await scope.ServiceProvider.GetRequiredService<BookingService>()
-            .CancelFutureBookingsAsync(b => b.UserId == Seed.BenId, "Leaver", Seed.SamId, Ct);
-        Assert.Equal(2, cancelled);
+            .CancelFutureBookingsAsync(b => b.UserId == Seed.BenId, "Leaver", actorId ?? Seed.SamId, Ct);
+        return cancelled;
     }
 
     [Fact]
     public async Task Cancelling_future_bookings_notifies_active_owners_and_audits_each_change()
     {
-        await CancelBensFutureBookingsAsSamAsync();
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("fr-FR");
+        try
+        {
+            Assert.Equal(2, await CancelBensFutureBookingsAsSamAsync());
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = culture;
+        }
 
         var ben = await _app.SignedInAsync(Seed.BenId);
         var notices = await ben.GetFromJsonAsync<List<NoticeDto>>("/api/notices", Ct);
         Assert.Equal(2, notices!.Count);
         Assert.All(notices, n => Assert.False(n.Read));
+        Assert.All(notices, n => Assert.Matches(@" on \d{1,2} [A-Z][a-z]{2} 2026 at \d\d:\d\d was cancelled: Leaver$", n.Message));
 
         Assert.Equal(HttpStatusCode.NoContent, (await ben.PostAsync($"/api/notices/{notices[0].Id}/read", null, Ct)).StatusCode);
         Assert.True((await ben.GetFromJsonAsync<List<NoticeDto>>("/api/notices", Ct))!.Single(n => n.Id == notices[0].Id).Read);
@@ -503,10 +680,71 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
         Assert.All(cancelEvents, e => Assert.Equal(Seed.SamId, e.ActorId));
     }
 
+    [Theory]
+    [InlineData("the actor")]
+    [InlineData("an inactive owner")]
+    public async Task A_cascade_does_not_notify_the_actor_or_an_inactive_owner(string who)
+    {
+        if (who == "an inactive owner")
+        {
+            await using var db = _app.Db();
+            (await db.Users.SingleAsync(u => u.Id == Seed.BenId, Ct)).IsActive = false;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        Assert.Equal(2, await CancelBensFutureBookingsAsSamAsync(who == "the actor" ? Seed.BenId : null));
+
+        await using var check = _app.Db();
+        Assert.False(await check.Notices.AnyAsync(n => n.UserId == Seed.BenId, Ct));
+    }
+
+    [Fact]
+    public async Task A_cascade_cancels_todays_kitchen_order_that_has_not_been_delivered()
+    {
+        var zone = _app.Services.GetRequiredService<TimeZoneInfo>();
+        var today = new DateOnly(2026, 11, 25);
+        await using (var db = _app.Db())
+        {
+            var dayStart = CompanyTime.StartOfDay(today, zone);
+            var dayEnd = CompanyTime.StartOfDay(today.AddDays(1), zone);
+            db.Bookings.Add(new Booking
+            {
+                Id = Guid.CreateVersion7(),
+                ResourceId = Seed.MainKitchenId,
+                UserId = Seed.BenId,
+                StartsAt = dayStart,
+                EndsAt = dayEnd,
+                BlockedUntil = dayEnd,
+                Attendees = 8,
+                DeliveryAt = CompanyTime.ToUtc(new DateTime(2026, 11, 25, 12, 30, 0), zone),
+                DeliveryRoomId = Seed.ThamesId,
+                Status = BookingStatus.Confirmed,
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+
+        Assert.Equal(3, await CancelBensFutureBookingsAsSamAsync());
+    }
+
+    [Fact]
+    public async Task Employees_cannot_read_a_retired_resource_by_id_but_admins_can()
+    {
+        await using (var db = _app.Db())
+        {
+            (await db.Resources.SingleAsync(r => r.Id == Seed.SevernId, Ct)).LastDay = new DateOnly(2026, 11, 24);
+            await db.SaveChangesAsync(Ct);
+        }
+        var ana = await _app.SignedInAsync(Seed.AnaId);
+        var sam = await _app.SignedInAsync(Seed.SamId);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await ana.GetAsync($"/api/resources/{Seed.SevernId}", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await sam.GetAsync($"/api/resources/{Seed.SevernId}", Ct)).StatusCode);
+    }
+
     [Fact]
     public async Task Someone_elses_notice_cannot_be_marked_read()
     {
-        await CancelBensFutureBookingsAsSamAsync();
+        Assert.Equal(2, await CancelBensFutureBookingsAsSamAsync());
         await using var db = _app.Db();
         var benNotice = await db.Notices.FirstAsync(n => n.UserId == Seed.BenId, Ct);
         var ana = await _app.SignedInAsync(Seed.AnaId);
