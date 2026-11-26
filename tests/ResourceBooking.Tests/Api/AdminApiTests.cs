@@ -489,4 +489,46 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
         await using var db = _app.Db();
         Assert.Equal([Seed.AnaId], await db.Notices.Select(n => n.UserId).ToListAsync(Ct));
     }
+
+    public static TheoryData<string, string, string> Refusals => new()
+    {
+        { "PUT", "/api/users/{missing}", "No such user" },
+        { "POST", "/api/users/{missing}/deactivation", "No such user" },
+        { "PUT", "/api/resources/{missing}", "No such resource" },
+        { "POST", "/api/resources/{missing}/retirement", "No such resource" },
+        { "GET", "/api/users/{missing}", "No such user" },
+        { "POST", "/api/resources/{severn}/retirement?year=9999", "Give a last day before the year 9999" },
+        { "GET", "/api/history?entityType=Notice", "entityType is User, Resource or Booking" },
+        { "GET", "/api/history?from=9999-12-31", "Give dates before the year 9999" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Refusals))]
+    public async Task Unknown_ids_and_out_of_range_input_are_refused_with_a_message(string method, string url, string message)
+    {
+        var sam = await SamAsync();
+        url = url.Replace("{missing}", Guid.CreateVersion7().ToString()).Replace("{severn}", Seed.SevernId.ToString());
+        object body = url.Contains("/retirement", StringComparison.Ordinal)
+            ? new { lastDay = url.EndsWith("year=9999", StringComparison.Ordinal) ? "9999-12-31" : Tomorrow }
+            : url.Contains("/api/users", StringComparison.Ordinal)
+                ? new { email = "x@sonicjoy-solutions.com", displayName = "X" }
+                : new { name = "X", type = "MeetingRoom", capacity = 2 };
+
+        var response = await sam.SendAsync(new HttpRequestMessage(new HttpMethod(method), url) { Content = method == "GET" ? null : JsonContent.Create(body) }, Ct);
+
+        Assert.Contains(response.StatusCode, new[] { HttpStatusCode.NotFound, HttpStatusCode.BadRequest });
+        Assert.Contains(message, await response.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Users_list_by_name_and_read_one_by_id()
+    {
+        var sam = await SamAsync();
+
+        var all = (await sam.GetFromJsonAsync<List<UserDto>>("/api/users", Ct))!;
+        var ben = (await sam.GetFromJsonAsync<UserDto>($"/api/users/{Seed.BenId}", Ct))!;
+
+        Assert.Equal(["Ana", "Ben", "Sam"], all.Select(u => u.DisplayName));
+        Assert.Equal(("ben@sonicjoy-solutions.com", Role.Employee, true), (ben.Email, ben.Role, ben.IsActive));
+    }
 }
