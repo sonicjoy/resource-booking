@@ -28,9 +28,15 @@ public static class CompanyTime
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, zone).DateTime);
 
     /// <summary>The UTC instant a local day begins; where midnight is skipped by a clock change, the first valid moment.</summary>
-    public static DateTimeOffset StartOfDay(DateOnly day, TimeZoneInfo zone)
+    public static DateTimeOffset StartOfDay(DateOnly day, TimeZoneInfo zone) => At(day, TimeOnly.MinValue, zone);
+
+    /// <summary>
+    /// A local day and time as UTC, for reports: a time the clock change skips moves to the first valid moment,
+    /// and a time it passes twice reads as standard time.
+    /// </summary>
+    public static DateTimeOffset At(DateOnly day, TimeOnly time, TimeZoneInfo zone)
     {
-        var local = day.ToDateTime(TimeOnly.MinValue);
+        var local = day.ToDateTime(time);
         while (zone.IsInvalidTime(local))
         {
             local = local.AddMinutes(30);

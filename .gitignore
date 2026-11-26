@@ -483,3 +483,10 @@ $RECYCLE.BIN/
 
 # The template ignores *.e2e (Visual Studio end-to-end test files), which also matches this project folder.
 !tests/ResourceBooking.E2E/
+
+# Mutation test runs
+StrykerOutput/
+
+# TLC run output
+formal/*_TTrace_*
+formal/states/

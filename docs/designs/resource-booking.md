@@ -231,7 +231,9 @@ The endpoints validate the request's shape before `BookingService` runs. `Bookin
 
 **Cancel** runs steps 1 to 3, then sets `status = Cancelled` and fills `cancel_reason`. Rows are never deleted, except by reseed.
 
-**Cascades.** `BookingService.CancelFutureBookings(filter, reason)` loads the bookings and changes them one at a time, because bulk updates bypass the audit interceptor. It writes a notice to each owner who is active and is not the person making the change.
+**Lock order.** Every write takes row locks in one order: resources, then users, then bookings. A catering order locks its kitchen, then its delivery room (FOR KEY SHARE, re-reading the room's last day under it), then the caller; otherwise the insert's foreign key would take the room's lock last and could deadlock with an edit and a deactivation. Users and bookings are each locked in id order. A cascade's notices take key locks on their owners after the bookings; a key lock conflicts only with FOR UPDATE, which no user lock takes. `formal/AdminLocks.tla` model-checks this order with TLC.
+
+**Cascades.** `BookingService.CancelFutureBookings(filter, reason)` locks the matching bookings in id order, re-checks that each is still confirmed, and changes them one at a time, because bulk updates bypass the audit interceptor. It writes a notice to each owner who is active and is not the person making the change.
 
 * **Retirement:** locks the resource. A `lastDay` before today returns 422 `LAST_DAY_PAST`. A confirmed booking running across `lastDay` returns 422 `IN_USE`. Otherwise it sets `last_day` and cancels the bookings after it.
 * **Deactivation:** locks the target and every active admin row with `FOR NO KEY UPDATE`. Removing the last active admin returns 422 `LAST_ADMIN`; demotion through `PUT` applies the same check. Deactivation then clears `is_active` and cancels the user's future bookings.
@@ -259,7 +261,7 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 * **401:** not signed in, or session rejected.
 * **403:** not an admin.
 * **404:** not found, or not yours.
-* **409:** `OVERLAP`, `NOT_CONFIRMED`.
+* **409:** `OVERLAP`, `NOT_CONFIRMED`, `DUPLICATE` (an email or resource name already in use; emails compare in lower case).
 * **422:** the rule codes above, plus `ALREADY_STARTED`, `IN_USE`, `LAST_DAY_PAST`, `LAST_ADMIN`, `UNITS_IN_USE`.
 * **429:** `RATE_LIMITED`, `BUDGET_EXHAUSTED`.
 
@@ -275,10 +277,10 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 | `POST /api/bookings` (`proposalId` optional) | signed in | 201 with `Location`. |
 | `PUT /api/bookings/{id}` (`proposalId` optional) | owner | 200. |
 | `DELETE /api/bookings/{id}?proposalId=` | owner | 204. Sets `Cancelled` and keeps the row. |
-| `GET /api/users`, `GET /api/users/{id}`, `POST /api/users`, `PUT /api/users/{id}` | admin | `PUT` cannot change `is_active`. |
+| `GET /api/users`, `GET /api/users/{id}`, `POST /api/users`, `PUT /api/users/{id}` | admin | `PUT` cannot change `is_active`; a `PUT` without `role` keeps the user's role. |
 | `POST /api/users/{id}/deactivation` | admin | 200 with the number of bookings cancelled. |
 | `GET /api/reports/utilisation?from&to` | admin | Ratio per resource. |
-| `GET /api/history?entityType&entityId&from&to` | admin | Audit events, described in words. |
+| `GET /api/history?entityType&entityId&from&to` | admin | `{items, more}`: up to 500 audit events, newest first, described in words; `more` is true when older matching events were left out. |
 | `GET /api/notices`, `POST /api/notices/{id}/read` | signed in | The caller's notices. |
 | `POST /api/assistant/messages` `{conversationId?, text}` | signed in | Reply text and any open proposals. |
 | `GET /api/assistant/traces?from&to`, `GET /api/assistant/traces/{conversationId}` | admin | Traces and their steps. |
