@@ -201,7 +201,7 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: OverlapState })
         {
-            return new ApiError(StatusCodes.Status409Conflict, "OVERLAP", OverlapMessage(resource));
+            return new ApiError(StatusCodes.Status409Conflict, ApiCodes.Overlap, OverlapMessage(resource));
         }
         await transaction.CommitAsync(ct);
         return booking;

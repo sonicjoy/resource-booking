@@ -1,0 +1,75 @@
+@inject ApiClient Api
+@implements IDisposable
+@inject NavigationManager Navigation
+
+<FluentButton Appearance="ButtonAppearance.Subtle" OnClick="ToggleAsync" aria-expanded="@open.ToString().ToLowerInvariant()">
+    Notices@(Unread > 0 ? $" ({Unread} unread)" : "")
+</FluentButton>
+
+@if (open)
+{
+    <aside class="drawer" role="dialog" aria-modal="false" aria-labelledby="notices-title">
+        <div class="drawer-head">
+            <h2 id="notices-title">Notices</h2>
+            <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => open = false">Close</FluentButton>
+        </div>
+        @if (notices.Count == 0)
+        {
+            <p>No notices.</p>
+        }
+        <ul>
+            @foreach (var notice in notices)
+            {
+                <li class="@(notice.Read ? "read" : "unread")">
+                    <p>@notice.Message</p>
+                    <span class="hint">@notice.CreatedAt.ToString("d MMM yyyy HH:mm")</span>
+                    @if (!notice.Read)
+                    {
+                        <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => MarkReadAsync(notice)">Mark read</FluentButton>
+                    }
+                </li>
+            }
+        </ul>
+    </aside>
+}
+
+@code {
+    private List<NoticeDto> notices = [];
+    private bool open;
+
+    private int Unread => notices.Count(n => !n.Read);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        await LoadAsync();
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+
+    private async Task LoadAsync() => notices = (await Api.NoticesAsync()).Value ?? notices;
+
+    private async Task ToggleAsync()
+    {
+        open = !open;
+        if (open)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task MarkReadAsync(NoticeDto notice)
+    {
+        if ((await Api.MarkReadAsync(notice.Id)).Ok)
+        {
+            await LoadAsync();
+        }
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}
