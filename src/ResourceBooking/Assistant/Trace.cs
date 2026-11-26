@@ -47,7 +47,10 @@ public sealed partial class Trace(AppDb db, TimeProvider clock, Guid conversatio
             {
                 // A failed step must not stay tracked, or every later save in this request fails with it.
                 db.Entry(step).State = EntityState.Detached;
-                if (attempt >= 3 || e.InnerException is not PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                if (attempt >= 3 || e.InnerException is not PostgresException
+                    {
+                        SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "ix_assistant_steps_conversation_id_seq",
+                    })
                 {
                     throw;
                 }

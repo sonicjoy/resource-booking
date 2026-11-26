@@ -393,11 +393,13 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         app.Model.Delay = TimeSpan.FromSeconds(5);
         var ana = await app.SignedInAsync(Seed.AnaId);
 
-        await ReplyAsync(await ana.PostAsJsonAsync("/api/assistant/messages", new { text = "hello" }, Ct));
+        var text = new string('é', 1000);
+        await ReplyAsync(await ana.PostAsJsonAsync("/api/assistant/messages", new { text }, Ct));
 
-        // The reservation (an input estimate plus the 800-token output cap) is kept: nothing reported the real usage.
+        // The reservation is kept, since nothing reported the real usage: the output cap (800) plus at least the
+        // message's UTF-8 bytes (2 per é) as its input bound.
         await using var db = app.Db();
-        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 800);
+        Assert.True((await db.TokenUsage.SingleAsync(Ct)).Tokens >= 800 + 2000);
     }
 
     [Fact]

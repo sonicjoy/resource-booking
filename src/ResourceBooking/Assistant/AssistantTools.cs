@@ -122,7 +122,7 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
             return "Not proposed: no upcoming booking of yours with that id.";
         }
         var summary = CancelSummary(booking);
-        await StoreAsync(ProposalKind.Cancel, bookingId, "{}", ct);
+        await StoreAsync(ProposalKind.Cancel, bookingId, "{}");
         return $"Proposed: {summary}. The user confirms it.";
     }
 
@@ -138,11 +138,15 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
             var reasons = error.Violations is { Count: > 0 } v ? string.Join(" ", v.Select(x => x.Message)) : error.Message;
             return $"Not proposed: {reasons}";
         }
-        var id = await StoreAsync(kind, bookingId, JsonSerializer.Serialize(request, JsonSerializerOptions.Web), ct);
+        var id = await StoreAsync(kind, bookingId, JsonSerializer.Serialize(request, JsonSerializerOptions.Web));
         return $"Proposed ({id}): {await SummaryAsync(request, ct)}. The user confirms it in the form.";
     }
 
-    private async Task<Guid> StoreAsync(ProposalKind kind, Guid? bookingId, string payload, CancellationToken ct)
+    /// <summary>
+    /// Saves an open proposal. Not with the request's token: a proposal half-saved when the turn timed out would
+    /// stay tracked and be sent again by the reply's trace save. A failed save is let go of for the same reason.
+    /// </summary>
+    private async Task<Guid> StoreAsync(ProposalKind kind, Guid? bookingId, string payload)
     {
         var proposal = new Proposal
         {
@@ -157,7 +161,15 @@ public sealed class AssistantTools(AppDb db, BookingService bookings, Availabili
             CreatedAt = clock.GetUtcNow(),
         };
         db.Proposals.Add(proposal);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch
+        {
+            db.Entry(proposal).State = EntityState.Detached;
+            throw;
+        }
         return proposal.Id;
     }
 
