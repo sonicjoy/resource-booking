@@ -93,6 +93,23 @@ public class Cuj6AssistantTests(AppFixture app) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task On_a_phone_the_panel_opens_full_screen_and_closes_back_to_the_grid()
+    {
+        var ana = await app.SignInAsync("Ana");
+        await ana.SetViewportSizeAsync(375, 812);
+
+        await ana.Button("Ask assistant").ClickAsync();
+        var box = await ana.Assistant().BoundingBoxAsync();
+
+        Assert.NotNull(box);
+        Assert.Equal((0f, 0f, 375f, 812f), (box.X, box.Y, MathF.Round(box.Width), MathF.Round(box.Height)));
+        await Expect(ana.Assistant().GetByLabel("Message")).ToBeInViewportAsync();
+        await ana.Assistant().Button("Close").ClickAsync();
+        await Expect(ana.Assistant()).ToBeHiddenAsync();
+        await Expect(ana.Cell("Thames", "17:30")).ToBeVisibleAsync();
+    }
+
+    [Fact]
     public async Task Ana_cancels_a_booking_through_the_assistant()
     {
         Assert.SkipWhen(app.Remote, "The deployed app's model can't be scripted.");
