@@ -151,7 +151,7 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         var context = new RuleContext(
             await db.Bookings.CountAsync(b => b.UserId == callerId && b.ResourceId == resource.Id
                 && b.Status == BookingStatus.Confirmed && b.EndsAt > now && b.Id != booking.Id, ct),
-            resource.Type == ResourceType.Catering ? await FreeUnitAsync(resource, candidate.Start, booking.Id, ct) : 0);
+            resource.Type == ResourceType.Catering ? await FreeUnitAsync(resource, candidate.Start, booking.Id, ct) : null);
 
         var violations = BookingRules.Check(candidate, resource, context, now, zone);
         if (violations.Count > 0)
@@ -166,7 +166,7 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         booking.Title = request.Title;
         booking.DeliveryAt = candidate.DeliveryAt;
         booking.DeliveryRoomId = resource.Type == ResourceType.Catering ? request.DeliveryRoomId : null;
-        booking.UnitNo = context.FreeUnit is { } unit && resource.Type == ResourceType.Catering ? unit : 0;
+        booking.UnitNo = context.FreeUnit ?? 0;
         if (existingId is null)
         {
             db.Bookings.Add(booking);
@@ -251,7 +251,11 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         return booking;
     }
 
-    /// <summary>The lowest kitchen unit with no confirmed order on that local day, or null when all are taken.</summary>
+    /// <summary>
+    /// The lowest kitchen unit with no confirmed order on that local day, or null when all are taken.
+    /// An order's range starts at its local day's start, so equality on StartsAt finds that day's orders
+    /// (AvailabilityService counts them the same way).
+    /// </summary>
     private async Task<int?> FreeUnitAsync(Resource kitchen, DateTimeOffset dayStart, Guid exceptBookingId, CancellationToken ct)
     {
         var taken = await db.Bookings
@@ -295,7 +299,8 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         }
     }
 
-    private static TimeSpan Turnaround(Resource resource) =>
+    /// <summary>The gap a resource needs between bookings; only types whose rule fields include it have one.</summary>
+    public static TimeSpan Turnaround(Resource resource) =>
         RuleFields.For(resource.Type).Contains(RuleField.Turnaround) ? resource.Turnaround ?? TimeSpan.Zero : TimeSpan.Zero;
 
     private static string OverlapMessage(Resource resource) => Turnaround(resource) is { } gap && gap > TimeSpan.Zero

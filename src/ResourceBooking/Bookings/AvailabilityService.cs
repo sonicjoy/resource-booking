@@ -28,8 +28,10 @@ public sealed class AvailabilityService(AppDb db, TimeZoneInfo zone)
             var own = bookings.Where(b => b.ResourceId == resource.Id).ToList();
             if (resource.Type == ResourceType.Catering)
             {
+                // A kitchen order's range is its whole local day, so the day's orders start at dayStart.
+                var orders = own.Count(b => b.StartsAt == dayStart);
                 return new ResourceAvailability(resource.Id, resource.Name, resource.Type, resource.Capacity,
-                    resource.OpensAt, resource.ClosesAt, resource.Units, Math.Max(0, resource.Units - own.Count), []);
+                    resource.OpensAt, resource.ClosesAt, resource.Units, Math.Max(0, resource.Units - orders), []);
             }
             var busy = own.Select(b =>
             {
@@ -67,7 +69,7 @@ public sealed class AvailabilityService(AppDb db, TimeZoneInfo zone)
                 }
                 continue;
             }
-            var blockedUntil = end + (type == ResourceType.Car ? resource.Turnaround ?? TimeSpan.Zero : TimeSpan.Zero);
+            var blockedUntil = end + BookingService.Turnaround(resource);
             var clash = await db.Bookings.AnyAsync(b => b.ResourceId == resource.Id && b.Status == BookingStatus.Confirmed
                 && b.StartsAt < blockedUntil && start < b.BlockedUntil, ct);
             if (!clash)
