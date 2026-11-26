@@ -2,7 +2,7 @@
 
 An internal web app for booking meeting rooms, pool cars and catering. Employees book from a day overview or by asking an assistant in plain words. Admins manage users and resources, retire rooms and deactivate leavers, and read utilisation, history and assistant traces. The server enforces every booking rule, and PostgreSQL refuses double bookings.
 
-* **Live demo:** https://app-production-6da71d52.up.railway.app. Sign in as any seeded user: Ana and Ben are employees, Sam is an admin.
+* **Live demo:** https://app-production-6da71d52.up.railway.app. Sign in as any seeded user: Ana and Ben are employees, Sam is an admin. The assistant answers only once an OpenAI key is configured there; until then it says it isn't set up.
 * **Design:** [docs/designs/resource-booking.md](docs/designs/resource-booking.md) covers the problem, user journeys, data model, rules, API, lock order, assistant and the build plan.
 
 ## What it does
@@ -43,7 +43,7 @@ $env:ConnectionStrings__Db = "Host=localhost;Port=5432;Database=booking;Username
 dotnet run --project src/ResourceBooking
 ```
 
-Open http://localhost:5210. On start the app applies its migrations and, if the database is empty, seeds three users, four resources and some bookings. Signed in as an admin, `POST /api/admin/reseed` restores that data.
+Open http://localhost:5210. On start the app applies its migrations and, if the database is empty, seeds three users, four resources and some bookings. There is no reset button; to restore the seed, call `POST /api/admin/reseed` with an admin's session, as the end-to-end tests do (`tests/ResourceBooking.E2E/AppFixture.cs`).
 
 The assistant needs an OpenAI key. Without one it replies that it isn't set up, and the forms work as usual:
 
@@ -57,39 +57,42 @@ dotnet user-secrets set "OpenAI:ApiKey" "<your key>" --project src/ResourceBooki
 |---|---|---|
 | `ConnectionStrings__Db` | none | PostgreSQL connection string |
 | `OpenAI__ApiKey`, `OpenAI__Model` | none, `gpt-4.1-mini` | the assistant's model; the key never reaches the browser |
-| `Booking__TimeZone` | `Europe/London` | the company's time zone; all times are its wall-clock times |
 | `Assistant__DailyTokenBudget` | 200000 | tokens all users may spend per London day |
 | `Assistant__MessagesPerMinute` | 10 | per user; 0 turns the limit off |
 | `Assistant__MaxOutputTokens` | 800 | the most tokens one model call may write |
-| `Assistant__TimeoutSeconds`, `MaxTurns`, `MaxIterations` | 30, 20, 5 | per message, per conversation, tool rounds per message |
+| `Assistant__TimeoutSeconds` | 30 | how long one message may take |
+| `Assistant__MaxTurns` | 20 | messages per conversation |
+| `Assistant__MaxIterations` | 5 | rounds of tool calls per message |
 | `Demo__ReseedWindowSeconds` | 30 | one reseed per window, shared by everyone; 0 turns the limit off |
 
 ## Tests
 
-Docker must be running. Testcontainers starts one PostgreSQL container, and each test app gets a fresh database in it.
+Docker must be running: Testcontainers starts a PostgreSQL container for each test project. Build first, then install the browser the end-to-end journeys use (this needs PowerShell 7, `pwsh`):
 
 ```powershell
-dotnet test --filter-not-trait "Category=Eval"
+dotnet build
 ```
-
-This is what CI runs on every push. It covers:
-* unit and property tests of the rules;
-* stateful model tests of user administration and the token budget;
-* API tests against the real database;
-* the Playwright journeys.
-
-Before the first run, install the browser:
 
 ```powershell
 pwsh tests/ResourceBooking.E2E/bin/Debug/net10.0/playwright.ps1 install chromium
 ```
 
+```powershell
+dotnet test --filter-not-trait "Category=Eval"
+```
+
+This is what CI runs on pull requests and on pushes to `main`. It covers:
+* unit and property tests of the rules;
+* stateful model tests of user administration and the token budget;
+* API tests against the real database;
+* the Playwright journeys.
+
 Further checks run on demand:
 
-* **Journeys against a deployed app:** set `E2E_BASE_URL` to its address. The assistant journeys need the scripted model, so they skip.
+* **Journeys against a deployed app:** set `E2E_BASE_URL` to its address. Each journey resets the deployed app's data first, and a deployed app allows one reset per 30 seconds (`Demo__ReseedWindowSeconds`), so run journeys one at a time, at least 30 seconds apart. The assistant journeys need the scripted model, so they skip.
 * **Assistant evals against the real model:** set `OpenAI__ApiKey`, then run `dotnet test --project tests/ResourceBooking.Tests --filter-trait "Category=Eval"`.
-* **Mutation testing:** `cd tests/ResourceBooking.Tests` then `dotnet stryker -t mtp -m "**/Assistant/TokenBudget.cs"`. Use any file pattern for `-m`. Add `--msbuild-path` if Visual Studio's MSBuild is picked up.
-* **The lock-order model:** `java -cp tla2tools.jar tlc2.TLC -config formal/AdminLocks.cfg formal/AdminLocks.tla`. It checks for deadlock and five invariants. Six switches in the config each add a known mistake, and the checker catches every one.
+* **Mutation testing:** run `dotnet tool restore` once, then `cd tests/ResourceBooking.Tests` and `dotnet stryker -t mtp -m "**/Assistant/TokenBudget.cs"`. Use any file pattern for `-m`. Add `--msbuild-path` if Visual Studio's MSBuild is picked up.
+* **The lock-order model:** needs Java and `tla2tools.jar` from the TLA+ tools release. Run `java -cp tla2tools.jar tlc2.TLC -config formal/AdminLocks.cfg formal/AdminLocks.tla`. It checks for deadlock and five invariants. Six switches in the config each add a known mistake, and the checker catches every one.
 
 ## What is mocked
 
@@ -104,7 +107,8 @@ Further checks run on demand:
 * Two messages sent at once to one conversation share a turn, so both sets of proposals stay open.
 * The keys that sign session cookies are stored unencrypted in the database. Production would protect them with a key vault or certificate.
 * One replica. Migrations run on start.
-* The grid has no keyboard-only or screen-reader walkthrough beyond its labelled cells.
+* The company time zone is London throughout: the client, the assistant's prompt and the seed assume it.
+* Every grid cell is a labelled button, but keyboard-only and screen-reader use of the whole page hasn't been walked through yet.
 
 ## How AI tools were used
 
@@ -112,5 +116,5 @@ The app was built with Claude Code as a pair programmer, working through a fixed
 
 * **Design.** A brainstorm with the developer led to a design doc. Fresh reviewer agents then critiqued the doc for scope, design, comprehension and implementation readiness, and the developer approved it before any code was written.
 * **Tests first.** Each plan step has a test tier set by its risk. Rules got property tests. User administration and the token budget got stateful model tests. Locking got the TLA+ model, which found a real deadlock in an earlier lock order. Mutation testing measured how strong the tests are.
-* **Review before merge.** Every step went through independent correctness, security and simplicity reviews by fresh agents that saw only the spec and the diff. Each set of fixes was reviewed again. Risky items went to the developer as explicit decisions.
+* **Review before merge.** From the database schema on, every step went through independent correctness, security and simplicity reviews by fresh agents that saw only the spec and the diff. Each set of fixes was reviewed again. Risky items went to the developer as explicit decisions.
 * **The assistant itself.** It uses OpenAI through Microsoft.Extensions.AI. The model only proposes, and code validates every booking. Deterministic checks such as rules, overlaps and permissions never depend on the model.
