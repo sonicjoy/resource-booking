@@ -59,14 +59,16 @@ public sealed class TracingChatClient(IChatClient inner, Trace trace, TokenBudge
 
     /// <summary>
     /// An upper bound on a call's input tokens for a byte-level tokenizer, where every token is at least one byte:
-    /// the UTF-8 bytes of every text, tool call, tool result and tool schema sent, plus a little per message.
+    /// the UTF-8 bytes of every text, reasoning item, tool call, tool result and tool schema sent, plus a little per
+    /// message.
     /// </summary>
     private static long InputBound(List<ChatMessage> messages, ChatOptions options)
     {
         static long Bytes(string? s) => s is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(s);
         var sent = messages.Sum(m => 8 + Bytes(m.Text)
             + m.Contents.OfType<FunctionCallContent>().Sum(c => Bytes(c.Name) + Bytes(JsonSerializer.Serialize(c.Arguments)))
-            + m.Contents.OfType<FunctionResultContent>().Sum(r => Bytes(r.Result is string text ? text : JsonSerializer.Serialize(r.Result))));
+            + m.Contents.OfType<FunctionResultContent>().Sum(r => Bytes(r.Result is string text ? text : JsonSerializer.Serialize(r.Result)))
+            + m.Contents.OfType<TextReasoningContent>().Sum(r => Bytes(r.Text) + Bytes(r.ProtectedData)));
         var tools = options.Tools?.OfType<AIFunction>().Sum(t => Bytes(t.Name) + Bytes(t.Description) + Bytes(t.JsonSchema.GetRawText())) ?? 0;
         return 50 + sent + tools;
     }

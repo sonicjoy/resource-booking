@@ -94,6 +94,34 @@ public class Cuj6AssistantTests(AppFixture app) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Each_message_shows_its_own_text_without_leading_space_and_keeps_its_line_breaks()
+    {
+        Assert.SkipWhen(app.Remote, "The deployed app's model can't be scripted.");
+        app.Model.On("two lines please", "Line one\nLine two");
+
+        var ana = await app.SignInAsync("Ana");
+        await ana.Button("Ask assistant").ClickAsync();
+        var panel = ana.Assistant();
+        await panel.FillInAsync("Message", "two lines please");
+        await panel.Button("Send").ClickAsync();
+        await Expect(panel.GetByText("Line two")).ToBeVisibleAsync();
+
+        Assert.Equal("two lines please", await ShownTextAsync(panel.Locator(".message.mine").Last));
+        Assert.Equal("Line one\nLine two", await ShownTextAsync(panel.Locator(".message.theirs").Last));
+    }
+
+    // The text as rendered (innerText honours white-space), leaving out the screen-reader label.
+    private static Task<string> ShownTextAsync(ILocator message) => message.EvaluateAsync<string>("""
+        li => {
+            const label = li.querySelector('.visually-hidden');
+            label.style.display = 'none';
+            const text = li.innerText;
+            label.style.display = '';
+            return text;
+        }
+        """);
+
+    [Fact]
     public async Task On_a_phone_the_panel_opens_full_screen_and_closes_back_to_the_grid()
     {
         var ana = await app.SignInAsync("Ana");

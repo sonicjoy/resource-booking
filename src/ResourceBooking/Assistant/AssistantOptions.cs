@@ -19,7 +19,7 @@ public sealed class AssistantOptions
     /// The most tokens one model call may write. Each call reserves its input estimate plus this from the budget
     /// before it starts, so a call that times out or is abandoned still counts.
     /// </summary>
-    public int MaxOutputTokens { get; set; } = 800;
+    public int MaxOutputTokens { get; set; } = 4000;
 
     /// <summary>Model calls per message, counting each round of tool calls.</summary>
     public int MaxIterations { get; set; } = 5;

@@ -17,7 +17,7 @@
         {
             <li class="message @(message.Mine ? "mine" : "theirs")">
                 <span class="visually-hidden">@(message.Mine ? "You:" : "Assistant:")</span>
-                @message.Text
+                <span class="text">@message.Text</span>
             </li>
         }
         @if (sending)

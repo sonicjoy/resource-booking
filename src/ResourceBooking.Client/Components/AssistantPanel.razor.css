@@ -44,6 +44,10 @@
     padding: 0.5rem 0.75rem;
     border-radius: 8px;
     max-width: 90%;
+}
+
+/* Only the message keeps its line breaks; the markup's own indentation around it collapses. */
+.message .text {
     white-space: pre-wrap;
 }
 

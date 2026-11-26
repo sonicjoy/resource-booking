@@ -330,15 +330,15 @@ What a caller sees of other people's bookings, amended by the [month view design
 * `propose_change`
 * `propose_cancellation`
 
-A propose tool runs the same checks as booking (`BookingService.PreviewAsync`: the request's validation, `BookingRules.Check` and the overlap test) without writing. If any fails, it tells the model why and stores nothing. Otherwise it stores an `Open` proposal for the current turn.
+The system prompt gives the model defaults so it proposes rather than asks (morning 09:00-12:00, afternoon 14:00-17:00, an hour when no end is given, the smallest room that seats everyone, catering to the room in the same request, moves keep length and room). An identical proposal made twice in one turn is offered once. A propose tool runs the same checks as booking (`BookingService.PreviewAsync`: the request's validation, `BookingRules.Check` and the overlap test) without writing. If any fails, it tells the model why and stores nothing. Otherwise it stores an `Open` proposal for the current turn.
 
 **Limits and failures.**
 
 * **Rate limit:** 10 messages a minute per user (`Assistant:MessagesPerMinute`, 0 turns it off), with the ASP.NET Core rate limiter. Over it returns 429 `RATE_LIMITED`.
-* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Each call first reserves an upper bound (its input's UTF-8 bytes plus `Assistant:MaxOutputTokens`, default 800, which is also sent as the call's output cap) and settles to the reported usage afterwards; a call that fails or is abandoned keeps its reservation. Over the budget returns 429 `BUDGET_EXHAUSTED`.
+* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Each call first reserves an upper bound (its input's UTF-8 bytes plus `Assistant:MaxOutputTokens`, default 4000 so a reasoning model has room to think, which is also sent as the call's output cap) and settles to the reported usage afterwards; a call that fails or is abandoned keeps its reservation. Over the budget returns 429 `BUDGET_EXHAUSTED`.
 * **Model timeout or error:** after 30 seconds (`Assistant:TimeoutSeconds`), or on any error, the panel shows a short reply that says so. The forms are unaffected.
 
-**Key.** `OpenAI:ApiKey` and `OpenAI:Model` come from config and never reach the client.
+**Key and model.** `OpenAI:ApiKey` and `OpenAI:Model` (default `gpt-6-luna`) come from config and never reach the client. Calls go through OpenAI's Responses API, which reasoning models need for tools, with `store: false` forced on every call: OpenAI keeps nothing for later use (its abuse-monitoring retention still applies), and each call carries the whole conversation rebuilt from the trace.
 
 **Evals.** `evals/cases.json` holds requests, a fixed clock and the expected proposal fields. `EvalTests`, marked `Category=Eval`, runs them against the real model on demand.
 
@@ -496,7 +496,7 @@ Steps 2 to 10 write their tests first and run them failing.
    * **Tests:** `E2E/Cuj3AdminSetupTests.cs`, `Cuj4RetireAndDeactivateTests.cs` and `Cuj5UtilisationAndHistoryTests.cs`.
    * **Gate:** step 10 starts only when CI is green and CUJ 1 passes against the deployed URL.
 10. **Assistant.** Test tier `standard`: tool calls go through validated rules; the global token budget cap `high`: a safety limit on spend.
-    * **Server:** `Server/Assistant/AssistantService.cs`, `TracingChatClient.cs` (with `TracedFunction`), `AssistantTools.cs` and `TokenBudget.cs`; `Server/Endpoints/AssistantEndpoints.cs`.
+    * **Server:** `Server/Assistant/AssistantService.cs`, `TracingChatClient.cs` (with `TracedFunction`), `AssistantTools.cs`, `OpenAIModel.cs` (the model, built from config) and `TokenBudget.cs`; `Server/Endpoints/AssistantEndpoints.cs`.
     * **Client:** `Client/Components/AssistantPanel.razor` and `Client/Pages/Admin/Traces.razor`.
     * **Evals:** `evals/cases.json`, copied to the test output by `Tests/ResourceBooking.Tests.csproj` (M).
     * **Stub:** `Tests/Infrastructure/StubChatClient.cs`, which replays scripted tool calls.

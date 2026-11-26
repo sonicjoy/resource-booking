@@ -31,12 +31,8 @@ builder.Services.AddScoped<ResourceBooking.Reports.History>();
 builder.Services.Configure<ResourceBooking.Assistant.AssistantOptions>(builder.Configuration.GetSection("Assistant"));
 builder.Services.AddScoped<ResourceBooking.Assistant.TokenBudget>();
 builder.Services.AddScoped<ResourceBooking.Assistant.AssistantService>();
-// The model: OpenAI when OpenAI:ApiKey is set (never sent to the browser); otherwise the assistant says it isn't set up.
-builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(_ =>
-    string.IsNullOrWhiteSpace(builder.Configuration["OpenAI:ApiKey"])
-        ? new ResourceBooking.Assistant.UnavailableChatClient()
-        : Microsoft.Extensions.AI.OpenAIClientExtensions.AsIChatClient(
-            new OpenAI.Chat.ChatClient(builder.Configuration["OpenAI:Model"] ?? "gpt-4.1-mini", builder.Configuration["OpenAI:ApiKey"])));
+// The model: OpenAI when OpenAI:ApiKey is set; otherwise the assistant says it isn't set up.
+builder.Services.AddSingleton(_ => ResourceBooking.Assistant.OpenAIModel.Create(builder.Configuration));
 builder.Services.AddAppAuthentication(builder.Environment);
 builder.Services.AddApiGuards();
 builder.Services.AddProblemDetails();
