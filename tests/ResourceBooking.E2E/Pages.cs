@@ -56,5 +56,43 @@ public static class Pages
     /// <summary>Today in the company's zone, which the app's labels and "Next day" count from.</summary>
     public static DateOnly LondonToday() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, London).DateTime);
 
+    /// <summary>A dialog by its heading.</summary>
+    public static ILocator Modal(this IPage page, string heading) =>
+        page.Locator("[role=dialog]").Filter(new() { Has = page.GetByRole(AriaRole.Heading, new() { Name = heading }) });
+
+    /// <summary>Fills a labelled field inside any scope (a dialog, a filter bar).</summary>
+    public static async Task FillInAsync(this ILocator scope, string label, string value)
+    {
+        var matches = scope.GetByLabel(label, new() { Exact = true });
+        await matches.First.WaitForAsync();
+        for (var i = 0; i < await matches.CountAsync(); i++)
+        {
+            var match = matches.Nth(i);
+            var tag = await match.EvaluateAsync<string>("e => e.tagName.toLowerCase()");
+            if (tag == "select")
+            {
+                await match.SelectOptionAsync(new SelectOptionValue { Label = value });
+                return;
+            }
+            if (tag is "input" or "textarea")
+            {
+                await match.FillAsync(value);
+                return;
+            }
+            if (tag.StartsWith("fluent-", StringComparison.Ordinal))
+            {
+                await match.Locator("input").FillAsync(value);
+                return;
+            }
+        }
+        throw new InvalidOperationException($"No fillable field labelled {label}");
+    }
+
+    /// <summary>A table row containing the given text.</summary>
+    public static ILocator Row(this IPage page, string text) => page.GetByRole(AriaRole.Row).Filter(new() { HasText = text });
+
+    public static async Task GoToAsync(this IPage page, string link) =>
+        await page.GetByRole(AriaRole.Link, new() { Name = link, Exact = true }).ClickAsync();
+
     public static async Task ConfirmAsync(this IPage page) => await page.Form().Button("Confirm").ClickAsync();
 }
