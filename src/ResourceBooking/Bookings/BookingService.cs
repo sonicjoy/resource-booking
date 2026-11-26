@@ -113,6 +113,77 @@ public sealed class BookingService(AppDb db, TimeProvider clock, TimeZoneInfo zo
         return bookings.Count;
     }
 
+    /// <summary>
+    /// What creating (or, with <paramref name="existingId"/>, changing) this booking would get, without booking:
+    /// the same resource, shape, ownership, rule and overlap checks as <see cref="SaveAsync"/>, read without locks.
+    /// The assistant proposes only what this accepts; the real booking still runs every check under its locks.
+    /// </summary>
+    public async Task<ApiError?> PreviewAsync(Guid? existingId, BookingRequest request, Guid callerId, CancellationToken ct)
+    {
+        var resource = await db.Resources.AsNoTracking().SingleOrDefaultAsync(r => r.Id == request.ResourceId, ct);
+        if (resource is null)
+        {
+            return ApiError.NotFound("No such resource");
+        }
+        if (await ShapeAsync(request, resource, ct) is { } shapeError)
+        {
+            return shapeError;
+        }
+        var candidate = Candidate(request, resource);
+        if (candidate is null)
+        {
+            return ApiError.BadRequest("A time doesn't exist in the company's time zone, or was sent with an offset");
+        }
+        if (!await db.Users.AnyAsync(u => u.Id == callerId && u.IsActive, ct))
+        {
+            return new ApiError(StatusCodes.Status401Unauthorized, "INACTIVE", "Your account is no longer active");
+        }
+        var now = clock.GetUtcNow();
+        var bookingId = existingId ?? Guid.Empty;
+        if (existingId is { } id)
+        {
+            var existing = await db.Bookings.AsNoTracking().SingleOrDefaultAsync(b => b.Id == id && b.UserId == callerId, ct);
+            if (existing is null)
+            {
+                return ApiError.NotFound("No such booking");
+            }
+            if (existing.Status != BookingStatus.Confirmed)
+            {
+                return new ApiError(StatusCodes.Status409Conflict, "NOT_CONFIRMED", "That booking is already cancelled");
+            }
+            if ((existing.DeliveryAt ?? existing.StartsAt) <= now)
+            {
+                return new ApiError(StatusCodes.Status422UnprocessableEntity, "ALREADY_STARTED", "That booking has already started");
+            }
+            if (existing.ResourceId != resource.Id)
+            {
+                return ApiError.BadRequest("A booking can't move to another resource; cancel it and book again");
+            }
+        }
+
+        var context = new RuleContext(
+            await db.Bookings.CountAsync(b => b.UserId == callerId && b.ResourceId == resource.Id
+                && b.Status == BookingStatus.Confirmed && b.EndsAt > now && b.Id != bookingId, ct),
+            resource.Type == ResourceType.Catering ? await FreeUnitAsync(resource, candidate.Start, bookingId, ct) : null);
+        var violations = BookingRules.Check(candidate, resource, context, now, zone);
+        if (violations.Count > 0)
+        {
+            return new ApiError(StatusCodes.Status422UnprocessableEntity, "RULES", "The booking breaks a rule", violations);
+        }
+        if (resource.Type != ResourceType.Catering)
+        {
+            // The same overlap the database refuses: [start, end + gap) against each booking's [start, blocked_until).
+            var blockedUntil = candidate.End + Turnaround(resource);
+            var clash = await db.Bookings.AnyAsync(b => b.ResourceId == resource.Id && b.Status == BookingStatus.Confirmed
+                && b.Id != bookingId && b.StartsAt < blockedUntil && candidate.Start < b.BlockedUntil, ct);
+            if (clash)
+            {
+                return new ApiError(StatusCodes.Status409Conflict, ApiCodes.Overlap, OverlapMessage(resource));
+            }
+        }
+        return null;
+    }
+
     private async Task<BookingResult> SaveAsync(Guid? existingId, BookingRequest request, Guid callerId, CancellationToken ct)
     {
         var resource = await db.Resources.AsNoTracking().SingleOrDefaultAsync(r => r.Id == request.ResourceId, ct);

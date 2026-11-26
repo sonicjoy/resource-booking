@@ -190,8 +190,13 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
             var seq = await db.AssistantSteps.Where(s => s.ConversationId == conversation).MaxAsync(s => s.Seq, Ct);
             db.AssistantSteps.AddRange(Enumerable.Range(1, 19).Select(i => new AssistantStep
             {
-                Id = Guid.CreateVersion7(), ConversationId = conversation, UserId = Seed.AnaId, Seq = seq + i,
-                Kind = StepKind.UserMessage, Payload = "\"again\"", At = _app.Clock.GetUtcNow(),
+                Id = Guid.CreateVersion7(),
+                ConversationId = conversation,
+                UserId = Seed.AnaId,
+                Seq = seq + i,
+                Kind = StepKind.UserMessage,
+                Payload = "\"again\"",
+                At = _app.Clock.GetUtcNow(),
             }));
             await db.SaveChangesAsync(Ct);
         }

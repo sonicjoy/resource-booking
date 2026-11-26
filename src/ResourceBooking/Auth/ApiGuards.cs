@@ -7,6 +7,7 @@ namespace ResourceBooking.Auth;
 public static class ApiGuards
 {
     public const string ReseedLimit = "reseed";
+    public const string AssistantLimit = "assistant";
 
     public static IServiceCollection AddApiGuards(this IServiceCollection services) =>
         services.AddRateLimiter(options =>
@@ -22,6 +23,20 @@ public static class ApiGuards
                     {
                         PermitLimit = 1,
                         Window = TimeSpan.FromSeconds(seconds),
+                        QueueLimit = 0,
+                    });
+            });
+            // Per signed-in user: Assistant:MessagesPerMinute (default 10); 0 turns it off.
+            options.AddPolicy(AssistantLimit, context =>
+            {
+                var perMinute = context.RequestServices.GetRequiredService<IConfiguration>().GetValue("Assistant:MessagesPerMinute", 10);
+                var user = context.User.UserId()?.ToString() ?? "anonymous";
+                return perMinute <= 0
+                    ? RateLimitPartition.GetNoLimiter(user)
+                    : RateLimitPartition.GetFixedWindowLimiter(user, _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = perMinute,
+                        Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     });
             });

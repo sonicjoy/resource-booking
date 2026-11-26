@@ -28,6 +28,15 @@ builder.Services.AddScoped<ResourceBooking.Admin.UserAdmin>();
 builder.Services.AddScoped<ResourceBooking.Admin.ResourceAdmin>();
 builder.Services.AddScoped<ResourceBooking.Reports.Utilisation>();
 builder.Services.AddScoped<ResourceBooking.Reports.History>();
+builder.Services.Configure<ResourceBooking.Assistant.AssistantOptions>(builder.Configuration.GetSection("Assistant"));
+builder.Services.AddScoped<ResourceBooking.Assistant.TokenBudget>();
+builder.Services.AddScoped<ResourceBooking.Assistant.AssistantService>();
+// The model: OpenAI when OpenAI:ApiKey is set (never sent to the browser); otherwise the assistant says it isn't set up.
+builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(_ =>
+    string.IsNullOrWhiteSpace(builder.Configuration["OpenAI:ApiKey"])
+        ? new ResourceBooking.Assistant.UnavailableChatClient()
+        : Microsoft.Extensions.AI.OpenAIClientExtensions.AsIChatClient(
+            new OpenAI.Chat.ChatClient(builder.Configuration["OpenAI:Model"] ?? "gpt-4.1-mini", builder.Configuration["OpenAI:ApiKey"])));
 builder.Services.AddAppAuthentication(builder.Environment);
 builder.Services.AddApiGuards();
 builder.Services.AddProblemDetails();
@@ -85,6 +94,7 @@ api.MapNoticeEndpoints();
 api.MapUserEndpoints();
 api.MapResourceEndpoints();
 api.MapReportEndpoints();
+api.MapAssistantEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
     .AddAdditionalAssemblies(typeof(ResourceBooking.Client._Imports).Assembly);
