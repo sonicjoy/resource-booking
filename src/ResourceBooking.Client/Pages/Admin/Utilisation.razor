@@ -65,9 +65,17 @@
         await LoadAsync();
     }
 
+    private int load;
+
+    /// <summary>Loads for the current filters; a slower answer for filters picked earlier is dropped.</summary>
     private async Task LoadAsync()
     {
+        var mine = ++load;
         var result = await Api.UtilisationAsync(from, to);
+        if (mine != load)
+        {
+            return;
+        }
         error = result.Problem?.Message;
         rows = result.Value;
     }

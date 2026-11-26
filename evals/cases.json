@@ -1,0 +1,90 @@
+{
+  "about": "Requests to the assistant and the proposals a good answer makes, run against the real model by EvalTests (Category=Eval). The clock is now (Wednesday 25 November 2026, 09:00 in London), on the seed data. Each expectation must match one proposal of the turn, and the turn must have no others; an empty list means nothing may be proposed. Times are London wall-clock times; startFrom and startTo bound a start or delivery time, both inclusive.",
+  "now": "2026-11-25T09:00:00Z",
+  "cases": [
+    {
+      "name": "room and lunch, then more people",
+      "user": "Ana",
+      "turns": [
+        {
+          "text": "a room for 8 tomorrow morning, and lunch for them at 12:30",
+          "expect": [
+            { "kind": "Create", "resource": ["Thames", "Severn"], "startFrom": "2026-11-26T08:00", "startTo": "2026-11-26T11:30", "attendees": 8 },
+            { "kind": "Create", "resource": ["Main Kitchen"], "startFrom": "2026-11-26T12:30", "startTo": "2026-11-26T12:30", "attendees": 8, "deliveryRoom": "same" }
+          ]
+        },
+        {
+          "text": "make it 10 people",
+          "expect": [
+            { "kind": "Create", "resource": ["Severn"], "startFrom": "2026-11-26T08:00", "startTo": "2026-11-26T11:30", "attendees": 10 },
+            { "kind": "Create", "resource": ["Main Kitchen"], "startFrom": "2026-11-26T12:30", "startTo": "2026-11-26T12:30", "attendees": 10, "deliveryRoom": "same" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a car that is taken is not proposed",
+      "user": "Ana",
+      "turns": [
+        { "text": "I need Pool Car 1 tomorrow from 9 to 11", "expect": [] }
+      ]
+    },
+    {
+      "name": "a room too small is not proposed",
+      "user": "Ana",
+      "turns": [
+        { "text": "book Thames for 20 people tomorrow at 2pm for an hour", "expect": [] }
+      ]
+    },
+    {
+      "name": "a room for a size picks one that seats it",
+      "user": "Ben",
+      "turns": [
+        {
+          "text": "I need a meeting room for 10 people on Friday from 2 to 3pm",
+          "expect": [
+            { "kind": "Create", "resource": ["Severn"], "startFrom": "2026-11-27T14:00", "startTo": "2026-11-27T14:00", "attendees": 10 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "moving an own booking",
+      "user": "Ana",
+      "turns": [
+        {
+          "text": "move my quarterly review to 3pm the same day",
+          "expect": [
+            { "kind": "Change", "resource": ["Severn"], "startFrom": "2026-11-28T15:00", "startTo": "2026-11-28T15:00", "attendees": 6 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cancelling an own booking",
+      "user": "Ana",
+      "turns": [
+        {
+          "text": "please cancel my quarterly review",
+          "expect": [
+            { "kind": "Cancel", "resource": ["Severn"] }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "someone else's booking is not offered",
+      "user": "Ana",
+      "turns": [
+        { "text": "cancel Ben's planning meeting in Thames on Friday", "expect": [] }
+      ]
+    },
+    {
+      "name": "a question books nothing",
+      "user": "Ben",
+      "turns": [
+        { "text": "what bookings do I have coming up?", "expect": [] }
+      ]
+    }
+  ]
+}

@@ -20,11 +20,14 @@ public sealed class BookingDraft
     public string? Title { get; set; }
     public Guid? DeliveryRoomId { get; set; }
 
+    /// <summary>The assistant's proposal this draft came from, sent so the booking is linked to it.</summary>
+    public Guid? ProposalId { get; set; }
+
     public bool IsCatering => Type == ResourceType.Catering;
 
     public BookingRequest ToRequest() => IsCatering
-        ? new BookingRequest { ResourceId = ResourceId, DeliveryAt = Date.ToDateTime(Start), DeliveryRoomId = DeliveryRoomId, Attendees = Attendees, Title = Blank(Title) }
-        : new BookingRequest { ResourceId = ResourceId, Start = Date.ToDateTime(Start), End = EndDate.ToDateTime(End), Attendees = Attendees, Title = Blank(Title) };
+        ? new BookingRequest { ResourceId = ResourceId, DeliveryAt = Date.ToDateTime(Start), DeliveryRoomId = DeliveryRoomId, Attendees = Attendees, Title = Blank(Title), ProposalId = ProposalId }
+        : new BookingRequest { ResourceId = ResourceId, Start = Date.ToDateTime(Start), End = EndDate.ToDateTime(End), Attendees = Attendees, Title = Blank(Title), ProposalId = ProposalId };
 
     public static BookingDraft From(BookingDto booking) => new()
     {
@@ -40,6 +43,28 @@ public sealed class BookingDraft
         Title = booking.Title,
         DeliveryRoomId = booking.DeliveryRoomId,
     };
+
+    /// <summary>The form for an assistant proposal to create or change a booking, carrying the proposal's id.</summary>
+    public static BookingDraft From(ProposalDto proposal, ResourceDto resource)
+    {
+        var request = proposal.Request!;
+        var at = request.DeliveryAt ?? request.Start!.Value;
+        return new BookingDraft
+        {
+            BookingId = proposal.Kind == ProposalKind.Change ? proposal.BookingId : null,
+            ProposalId = proposal.Id,
+            ResourceId = resource.Id,
+            ResourceName = resource.Name,
+            Type = resource.Type,
+            Date = DateOnly.FromDateTime(at),
+            EndDate = DateOnly.FromDateTime(request.End ?? at),
+            Start = TimeOnly.FromDateTime(at),
+            End = request.End is { } end ? TimeOnly.FromDateTime(end) : default,
+            Attendees = request.Attendees,
+            Title = request.Title,
+            DeliveryRoomId = request.DeliveryRoomId,
+        };
+    }
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }

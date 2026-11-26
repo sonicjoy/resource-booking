@@ -262,7 +262,7 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 * **403:** not an admin.
 * **404:** not found, or not yours.
 * **409:** `OVERLAP`, `NOT_CONFIRMED`, `DUPLICATE` (an email or resource name already in use; emails compare in lower case).
-* **422:** the rule codes above, plus `ALREADY_STARTED`, `IN_USE`, `LAST_DAY_PAST`, `LAST_ADMIN`, `UNITS_IN_USE`.
+* **422:** the rule codes above, plus `ALREADY_STARTED`, `IN_USE`, `LAST_DAY_PAST`, `LAST_ADMIN`, `UNITS_IN_USE`, `TURN_LIMIT`.
 * **429:** `RATE_LIMITED`, `BUDGET_EXHAUSTED`.
 
 | Method and path | Who | Result |
@@ -300,7 +300,7 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 **Conversations.**
 
 * A `conversationId` that belongs to someone else returns 404.
-* History is rebuilt from the conversation's `assistant_steps`. A conversation holds at most 20 turns.
+* History is rebuilt from the conversation's `assistant_steps`. A conversation holds at most 20 turns; the 21st message returns 422 `TURN_LIMIT`.
 * At the start of each message, the server marks open proposals from earlier turns as `Superseded`. Proposals made in the same turn stay open together.
 * The system prompt carries today's date in the company zone and the user's name.
 
@@ -318,13 +318,13 @@ Errors are Problem Details. Every 409, 422 and 429 has a `code` and a `message`;
 * `propose_change`
 * `propose_cancellation`
 
-A propose tool runs `BookingRules.Check`, then asks `AvailabilityService` whether the slot is free. If the slot is busy, it tells the model and stores nothing. Otherwise it stores an `Open` proposal for the current turn.
+A propose tool runs the same checks as booking (`BookingService.PreviewAsync`: the request's validation, `BookingRules.Check` and the overlap test) without writing. If any fails, it tells the model why and stores nothing. Otherwise it stores an `Open` proposal for the current turn.
 
 **Limits and failures.**
 
-* **Rate limit:** 10 messages a minute per user, with the ASP.NET Core rate limiter. Over it returns 429 `RATE_LIMITED`.
-* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Over it returns 429 `BUDGET_EXHAUSTED`.
-* **Model timeout or error:** after 30 seconds, or on any error, the panel shows a short reply that says so. The forms are unaffected.
+* **Rate limit:** 10 messages a minute per user (`Assistant:MessagesPerMinute`, 0 turns it off), with the ASP.NET Core rate limiter. Over it returns 429 `RATE_LIMITED`.
+* **Token budget:** one global daily budget from config (`Assistant:DailyTokenBudget`), counted in `token_usage` and checked before each model call. Each call first reserves an upper bound (its input's UTF-8 bytes plus `Assistant:MaxOutputTokens`, default 800, which is also sent as the call's output cap) and settles to the reported usage afterwards; a call that fails or is abandoned keeps its reservation. Over the budget returns 429 `BUDGET_EXHAUSTED`.
+* **Model timeout or error:** after 30 seconds (`Assistant:TimeoutSeconds`), or on any error, the panel shows a short reply that says so. The forms are unaffected.
 
 **Key.** `OpenAI:ApiKey` and `OpenAI:Model` come from config and never reach the client.
 
@@ -373,7 +373,7 @@ Simple layouts built from stock Fluent UI components. All times are shown in the
 * **Image:** one Dockerfile. `mcr.microsoft.com/dotnet/sdk:10.0` builds the app and `aspnet:10.0` (Debian, with time-zone data) runs it.
 * **Start-up:** the app applies migrations, then seeds the database if it is empty.
 * **Reseed:** the only bulk delete. In one transaction it empties every app table except `token_usage` and the Data Protection keys, then re-runs the seed with fixed ids. Seeded users therefore keep their sessions, and a session whose user no longer exists is rejected. Interrupting another visitor is an accepted cost.
-* **Config:** comes from environment variables: `ConnectionStrings__Db`, `OpenAI__ApiKey`, `OpenAI__Model`, `Booking__TimeZone`, `Assistant__DailyTokenBudget`.
+* **Config:** comes from environment variables: `ConnectionStrings__Db`, `OpenAI__ApiKey`, `OpenAI__Model`, `Booking__TimeZone`, and the `Assistant__*` limits (`DailyTokenBudget`, `MessagesPerMinute`, `TimeoutSeconds`, `MaxTurns`, `MaxIterations`, `MaxOutputTokens`). Without `OpenAI__ApiKey` the assistant answers that it isn't set up, and the forms work as usual.
 * **Railway:** runs one app service, pinned to one replica, and one PostgreSQL service. It deploys `main` after CI passes.
 
 ## Alternatives Considered
@@ -484,7 +484,7 @@ Steps 2 to 10 write their tests first and run them failing.
    * **Tests:** `E2E/Cuj3AdminSetupTests.cs`, `Cuj4RetireAndDeactivateTests.cs` and `Cuj5UtilisationAndHistoryTests.cs`.
    * **Gate:** step 10 starts only when CI is green and CUJ 1 passes against the deployed URL.
 10. **Assistant.** Test tier `standard`: tool calls go through validated rules; the global token budget cap `high`: a safety limit on spend.
-    * **Server:** `Server/Assistant/AssistantService.cs`, `TracingChatClient.cs`, `ToolTracing.cs`, `AssistantTools.cs` and `TokenBudget.cs`; `Server/Endpoints/AssistantEndpoints.cs`.
+    * **Server:** `Server/Assistant/AssistantService.cs`, `TracingChatClient.cs` (with `TracedFunction`), `AssistantTools.cs` and `TokenBudget.cs`; `Server/Endpoints/AssistantEndpoints.cs`.
     * **Client:** `Client/Components/AssistantPanel.razor` and `Client/Pages/Admin/Traces.razor`.
     * **Evals:** `evals/cases.json`, copied to the test output by `Tests/ResourceBooking.Tests.csproj` (M).
     * **Stub:** `Tests/Infrastructure/StubChatClient.cs`, which replays scripted tool calls.
@@ -496,7 +496,8 @@ Steps 2 to 10 write their tests first and run them failing.
       * The turn cap holds.
       * 429 `BUDGET_EXHAUSTED` and 429 `RATE_LIMITED`.
       * Every trace step kind is written.
-    * **Eval tests:** `EvalTests.cs`, with `[Trait("Category","Eval")]`.
+    * **Eval tests:** `EvalTests.cs`, with `[Trait("Category","Eval")]`; `EvalRunnerTests.cs` checks the runner on the stub, in CI.
+    * **Budget (tier high):** `TokenBudgetModelTests.cs`, a stateful model of tokens per London day across midnight and both clock changes, plus concurrent charges and the endpoint's stop point.
     * **End to end:** `E2E/Cuj6AssistantTests.cs`, on the stub.
 11. **Docs.** No tests. `README.md`: how to run it locally, what is mocked, known limits, and how AI tools were used. It links to this design.
 

@@ -1,0 +1,190 @@
+@page "/admin/traces"
+@attribute [Authorize(Roles = "Admin")]
+@inject ApiClient Api
+@inject CompanyClock Clock
+
+<PageTitle>Traces</PageTitle>
+
+<h1>Traces</h1>
+<p class="hint">Assistant conversations with a step in these dates, newest first, up to 200: what was asked, each model and tool call, and the reply. Counts cover the steps in these dates. London time.</p>
+
+<div class="filters">
+    <label class="field"><span>From</span><input type="date" value="@from.ToString("yyyy-MM-dd")" @onchange="e => DateChanged(e, true)" /></label>
+    <label class="field"><span>To</span><input type="date" value="@to.ToString("yyyy-MM-dd")" @onchange="e => DateChanged(e, false)" /></label>
+</div>
+
+@if (error is not null)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
+}
+
+@if (traces is not null)
+{
+    <table class="bookings">
+        <thead>
+            <tr>
+                <th scope="col">Last message</th>
+                <th scope="col">User</th>
+                <th scope="col">Messages</th>
+                <th scope="col">Steps</th>
+                <th scope="col">Tokens</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in traces)
+            {
+                <tr>
+                    <td>@t.Last.ToString("d MMM yyyy HH:mm")</td>
+                    <td>@t.User</td>
+                    <td>@t.Turns</td>
+                    <td>@t.Steps</td>
+                    <td>@t.Tokens</td>
+                    <td class="row-actions"><FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => OpenAsync(t)">Open</FluentButton></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (traces.Count == 0)
+    {
+        <p>No conversations in these dates.</p>
+    }
+}
+
+@if (open is not null)
+{
+    <section class="trace" aria-labelledby="trace-title">
+        <h2 id="trace-title">@open.User, started @open.Started.ToString("d MMM yyyy HH:mm")</h2>
+        @if (steps is null)
+        {
+            <p>Loading…</p>
+        }
+        else
+        {
+            <ol class="timeline">
+                @foreach (var step in steps)
+                {
+                    <li class="step @step.Kind.ToString().ToLowerInvariant()">
+                        <div class="step-head">
+                            <strong>@Name(step.Kind)</strong>
+                            <span class="hint">@step.At.ToString("HH:mm:ss")@Cost(step)</span>
+                        </div>
+                        @if (Text(step.Payload) is { } text)
+                        {
+                            <p>@text</p>
+                        }
+                        else
+                        {
+                            <pre>@Pretty(step.Payload)</pre>
+                        }
+                    </li>
+                }
+            </ol>
+        }
+    </section>
+}
+
+@code {
+    private DateOnly from;
+    private DateOnly to;
+    private List<TraceSummary>? traces;
+    private TraceSummary? open;
+    private List<TraceStep>? steps;
+    private string? error;
+
+    protected override Task OnInitializedAsync()
+    {
+        to = Clock.Today;
+        from = to.AddDays(-6);
+        return LoadAsync();
+    }
+
+    private int load;
+
+    /// <summary>Loads for the current filters; a slower answer for filters picked earlier is dropped.</summary>
+    private async Task LoadAsync()
+    {
+        var mine = ++load;
+        var result = await Api.TracesAsync(from, to);
+        if (mine != load)
+        {
+            return;
+        }
+        error = result.Problem?.Message;
+        traces = result.Value;
+    }
+
+    private async Task DateChanged(ChangeEventArgs e, bool isFrom)
+    {
+        if (!DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var day))
+        {
+            return;
+        }
+        if (isFrom)
+        {
+            from = day;
+        }
+        else
+        {
+            to = day;
+        }
+        await LoadAsync();
+    }
+
+    private async Task OpenAsync(TraceSummary trace)
+    {
+        open = trace;
+        steps = null;
+        var result = await Api.TraceAsync(trace.ConversationId);
+        if (open != trace)
+        {
+            // Another conversation was opened while this one loaded.
+            return;
+        }
+        error = result.Problem?.Message;
+        steps = result.Value ?? [];
+    }
+
+    private static string Name(StepKind kind) => kind switch
+    {
+        StepKind.UserMessage => "User message",
+        StepKind.ModelCall => "Model call",
+        StepKind.ToolCall => "Tool call",
+        StepKind.Reply => "Reply",
+        _ => kind.ToString(),
+    };
+
+    private static string Cost(TraceStep s)
+    {
+        var parts = new List<string>();
+        if (s.InputTokens is not null || s.OutputTokens is not null)
+        {
+            parts.Add($"{s.InputTokens ?? 0} in, {s.OutputTokens ?? 0} out tokens");
+        }
+        if (s.DurationMs is { } ms)
+        {
+            parts.Add($"{ms} ms");
+        }
+        return parts.Count == 0 ? "" : " · " + string.Join(", ", parts);
+    }
+
+    /// <summary>A user message or reply is stored as a JSON string; show it as text.</summary>
+    private static string? Text(string payload)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(payload);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.String ? doc.RootElement.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return payload;
+        }
+    }
+
+    private static string Pretty(string payload)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(payload);
+        return System.Text.Json.JsonSerializer.Serialize(doc.RootElement, new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    }
+}

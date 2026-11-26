@@ -28,4 +28,22 @@ public class Cuj5UtilisationAndHistoryTests(AppFixture app) : IAsyncLifetime
         await Expect(sam.Row("Design review").Or(sam.Row("Thames,")).First).ToBeVisibleAsync();
         await Expect(sam.Row("booked").First).ToContainTextAsync("System");
     }
+
+    [Fact]
+    public async Task A_slow_unfiltered_history_never_replaces_the_filter_picked_after_it()
+    {
+        var sam = await app.SignInAsync("Sam");
+        await sam.RouteAsync(new System.Text.RegularExpressions.Regex("/api/history$"), async route =>
+        {
+            await Task.Delay(1500);
+            await route.ContinueAsync();
+        });
+
+        await sam.GoToAsync("History");
+        await sam.Locator(".filters").FillInAsync("Entity", "Bookings");
+        await sam.WaitForTimeoutAsync(2500);
+
+        await Expect(sam.Row("User:")).ToHaveCountAsync(0);
+        await Expect(sam.Row("Booking:").First).ToBeVisibleAsync();
+    }
 }

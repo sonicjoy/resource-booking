@@ -1,0 +1,176 @@
+@inject ApiClient Api
+
+@*
+    The assistant as a side panel on Book. It turns a request in words into proposals; each one is confirmed in
+    the booking form (Review) or, for a cancellation, here after a second click. Nothing is booked from the panel.
+*@
+<aside class="assistant" aria-label="Assistant" hidden="@(!Open)">
+    <div class="assistant-head">
+        <h2>Assistant</h2>
+        <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="NewConversation">New conversation</FluentButton>
+        <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="OnClose">Close</FluentButton>
+    </div>
+    <p class="hint">Ask in your own words, for example "a room for 8 tomorrow morning". It proposes; nothing is booked until you confirm. Messages go to OpenAI and are recorded for admins to read, so leave out personal details.</p>
+
+    <ol class="messages" aria-live="polite">
+        @foreach (var message in messages)
+        {
+            <li class="message @(message.Mine ? "mine" : "theirs")">
+                <span class="visually-hidden">@(message.Mine ? "You:" : "Assistant:")</span>
+                @message.Text
+            </li>
+        }
+        @if (sending)
+        {
+            <li class="message theirs pending">Thinking…</li>
+        }
+    </ol>
+
+    @if (problem is not null)
+    {
+        <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@problem</FluentMessageBar></div>
+    }
+
+    @foreach (var proposal in proposals)
+    {
+        <div class="proposal">
+            <p>@Label(proposal)</p>
+            @if (Confirmed.Contains(proposal.Id))
+            {
+                <p class="done">Confirmed</p>
+            }
+            else if (cancelled.Contains(proposal.Id))
+            {
+                <p class="done">Cancelled</p>
+            }
+            else if (proposal.Kind != ProposalKind.Cancel)
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="() => OnReview.InvokeAsync(proposal)">Review</FluentButton>
+            }
+            else if (askingToCancel == proposal.Id)
+            {
+                <div class="actions">
+                    <FluentButton Appearance="ButtonAppearance.Primary" Loading="cancelling" OnClick="() => CancelAsync(proposal)">Yes, cancel it</FluentButton>
+                    <FluentButton Appearance="ButtonAppearance.Default" OnClick="() => askingToCancel = null">Keep it</FluentButton>
+                </div>
+            }
+            else
+            {
+                <FluentButton Appearance="ButtonAppearance.Outline" OnClick="() => askingToCancel = proposal.Id">Cancel booking</FluentButton>
+            }
+        </div>
+    }
+
+    <EditForm Model="input" OnSubmit="SendAsync" class="ask">
+        <label for="assistant-message" class="visually-hidden">Message</label>
+        <textarea id="assistant-message" rows="2" maxlength="1000" placeholder="Message" @bind="input.Text" @bind:event="oninput"></textarea>
+        <FluentButton Type="ButtonType.Submit" Appearance="ButtonAppearance.Primary" Loading="sending" Disabled="string.IsNullOrWhiteSpace(input.Text)">Send</FluentButton>
+    </EditForm>
+</aside>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Opens the booking form pre-filled with a booking or change proposal.</summary>
+    [Parameter] public EventCallback<ProposalDto> OnReview { get; set; }
+
+    /// <summary>Proposals confirmed in the booking form, kept by the page that owns the form.</summary>
+    [Parameter] public IReadOnlySet<Guid> Confirmed { get; set; } = new HashSet<Guid>();
+
+    /// <summary>Something was booked or cancelled from here, so the page's grid is out of date.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private sealed record Message(bool Mine, string Text);
+
+    private sealed class Input
+    {
+        public string Text { get; set; } = "";
+    }
+
+    private readonly Input input = new();
+    private readonly List<Message> messages = [];
+    private readonly HashSet<Guid> cancelled = [];
+    private IReadOnlyList<ProposalDto> proposals = [];
+    private Guid? conversationId;
+    private Guid? askingToCancel;
+    private string? problem;
+    private bool sending;
+    private bool cancelling;
+
+    private async Task SendAsync()
+    {
+        var text = input.Text.Trim();
+        if (text.Length == 0 || sending)
+        {
+            return;
+        }
+        sending = true;
+        problem = null;
+        messages.Add(new Message(true, text));
+        input.Text = "";
+        try
+        {
+            var result = await Api.AskAsync(new AssistantRequest { ConversationId = conversationId, Text = text });
+            if (result.Value is { } reply)
+            {
+                conversationId = reply.ConversationId;
+                messages.Add(new Message(false, reply.Text));
+                // A new turn replaces the last turn's proposals: the server has superseded them.
+                proposals = reply.Proposals;
+                askingToCancel = null;
+                return;
+            }
+            var failed = result.Problem!;
+            problem = failed.Message;
+            // The server may have superseded the last turn's proposals before failing: don't offer them again.
+            proposals = [];
+            askingToCancel = null;
+            if (failed.Status == 404)
+            {
+                // The conversation is gone (the data was reset): the next message starts a new one.
+                conversationId = null;
+            }
+        }
+        finally
+        {
+            sending = false;
+        }
+    }
+
+    private void NewConversation()
+    {
+        conversationId = null;
+        messages.Clear();
+        proposals = [];
+        problem = null;
+        askingToCancel = null;
+    }
+
+    private async Task CancelAsync(ProposalDto proposal)
+    {
+        cancelling = true;
+        try
+        {
+            var result = await Api.CancelAsync(proposal.BookingId!.Value, proposal.Id);
+            problem = result.Problem?.Message;
+            if (result.Ok)
+            {
+                cancelled.Add(proposal.Id);
+                askingToCancel = null;
+                await OnChanged.InvokeAsync();
+            }
+        }
+        finally
+        {
+            cancelling = false;
+        }
+    }
+
+    private static string Label(ProposalDto p) => p.Kind switch
+    {
+        ProposalKind.Change => $"Change to: {p.Summary}",
+        _ => p.Summary,
+    };
+}

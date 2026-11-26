@@ -23,6 +23,9 @@ public static class Pages
     public static async Task OpenTabAsync(this IPage page, string tab) =>
         await page.GetByRole(AriaRole.Tab, new() { Name = tab, Exact = true }).ClickAsync();
 
+    /// <summary>The assistant's side panel on Book.</summary>
+    public static ILocator Assistant(this IPage page) => page.Locator("aside[aria-label='Assistant']");
+
     public static ILocator Form(this IPage page) => page.Locator("[role=dialog][aria-labelledby='booking-form-title']");
 
     /// <summary>
