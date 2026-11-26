@@ -1,0 +1,142 @@
+@page "/my-bookings"
+@attribute [Authorize]
+@inject ApiClient Api
+@inject CompanyClock Clock
+
+<PageTitle>My bookings</PageTitle>
+
+<h1>My bookings</h1>
+<p class="hint">London time</p>
+
+@if (message is not null)
+{
+    <div role="status"><FluentMessageBar Intent="MessageBarIntent.Success" AllowDismiss="false">@message</FluentMessageBar></div>
+}
+@if (error is not null)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
+}
+
+<FluentTabs ActiveTabId="@tab" ActiveTabIdChanged="t => tab = t ?? tab">
+    <FluentTab Id="upcoming" Header="Upcoming" />
+    <FluentTab Id="past" Header="Past" />
+</FluentTabs>
+
+@if (bookings is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    var shown = tab == "past" ? Past : Upcoming;
+    @if (shown.Count == 0)
+    {
+        <p>@(tab == "past" ? "No past bookings." : "Nothing booked. Book a room, car or catering from Book.")</p>
+    }
+    else
+    {
+        <table class="bookings">
+            <thead>
+                <tr>
+                    <th scope="col">What</th>
+                    <th scope="col">When</th>
+                    <th scope="col">People</th>
+                    <th scope="col">Title</th>
+                    <th scope="col">Status</th>
+                    @if (tab != "past")
+                    {
+                        <th scope="col"><span class="visually-hidden">Actions</span></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var b in shown)
+                {
+                    <tr>
+                        <td>@b.ResourceName</td>
+                        <td>@When(b)</td>
+                        <td>@b.Attendees@(b.DeliveryAt is null ? "" : " portions")</td>
+                        <td>@b.Title</td>
+                        <td>@(b.Status == BookingStatus.Confirmed ? "Confirmed" : "Cancelled")</td>
+                        @if (tab != "past")
+                        {
+                            <td class="row-actions">
+                                @if (b.Status == BookingStatus.Confirmed)
+                                {
+                                    <FluentButton Appearance="ButtonAppearance.Subtle" Title="@($"Edit {b.ResourceName} {When(b)}")" OnClick="() => draft = BookingDraft.From(b)">Edit</FluentButton>
+                                    <FluentButton Appearance="ButtonAppearance.Subtle" Title="@($"Cancel {b.ResourceName} {When(b)}")" OnClick="() => cancelling = b">Cancel</FluentButton>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@if (draft is not null)
+{
+    <BookingForm Draft="draft" OnSaved="SavedAsync" OnCancel="() => draft = null" />
+}
+
+@if (cancelling is not null)
+{
+    <Modal Id="cancel-booking" Title="Cancel this booking?">
+        <p>@cancelling.ResourceName, @When(cancelling). This can't be undone.</p>
+        <div class="actions">
+            <FluentButton Appearance="ButtonAppearance.Primary" OnClick="CancelAsync">Cancel booking</FluentButton>
+            <FluentButton OnClick="() => cancelling = null">Keep it</FluentButton>
+        </div>
+    </Modal>
+}
+
+@code {
+    private string tab = "upcoming";
+    private List<BookingDto>? bookings;
+    private BookingDraft? draft;
+    private BookingDto? cancelling;
+    private string? message;
+    private string? error;
+
+    private static DateTime Starts(BookingDto b) => b.DeliveryAt ?? b.Start;
+
+    private List<BookingDto> Upcoming => bookings!.Where(b => Starts(b) > Clock.Now).OrderBy(Starts).ToList();
+
+    private List<BookingDto> Past => bookings!.Where(b => Starts(b) <= Clock.Now).OrderByDescending(Starts).ToList();
+
+    private static string When(BookingDto b) => b.DeliveryAt is { } delivery
+        ? $"{delivery:ddd d MMM yyyy}, delivered {delivery:HH:mm}"
+        : b.Start.Date == b.End.Date
+            ? $"{b.Start:ddd d MMM yyyy}, {b.Start:HH:mm} to {b.End:HH:mm}"
+            : $"{b.Start:ddd d MMM HH:mm} to {b.End:ddd d MMM HH:mm}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = await Api.MineAsync();
+        error = result.Problem?.Message;
+        bookings = result.Value ?? [];
+    }
+
+    private async Task SavedAsync(BookingDto booking)
+    {
+        draft = null;
+        message = $"Changed your booking of {booking.ResourceName}.";
+        await LoadAsync();
+    }
+
+    private async Task CancelAsync()
+    {
+        var booking = cancelling!;
+        cancelling = null;
+        var result = await Api.CancelAsync(booking.Id);
+        error = result.Problem?.Message;
+        message = result.Ok ? $"Cancelled your booking of {booking.ResourceName}." : null;
+        await LoadAsync();
+    }
+}

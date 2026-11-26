@@ -1,0 +1,18 @@
+@* A modal dialog over a dimmed page: the booking form and confirmations. The heading names the dialog. *@
+<div class="backdrop">
+    <div class="modal @Class" role="dialog" aria-modal="true" aria-labelledby="@($"{Id}-title")">
+        <h2 id="@($"{Id}-title")">@Title</h2>
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    /// <summary>Unique on the page; the heading's id is derived from it.</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    [Parameter] public string? Class { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

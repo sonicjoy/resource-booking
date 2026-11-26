@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveWebAssemblyComponents();
 
-var companyZone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["Booking:TimeZone"] ?? "Europe/London");
+var companyZone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["Booking:TimeZone"] ?? ResourceBooking.Shared.ApiCodes.CompanyZone);
 builder.Services.AddSingleton(companyZone);
 builder.Services.AddSingleton(TimeProvider.System);
 

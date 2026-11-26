@@ -1,0 +1,10 @@
+@if (Problem?.FieldError(Field) is { } message)
+{
+    <p class="field-error">@message</p>
+}
+
+@code {
+    [Parameter] public ApiProblem? Problem { get; set; }
+
+    [Parameter, EditorRequired] public string Field { get; set; } = "";
+}
