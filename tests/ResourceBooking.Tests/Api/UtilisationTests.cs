@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using ResourceBooking.Bookings;
 using ResourceBooking.Data;
 using ResourceBooking.Data.Entities;
+using ResourceBooking.Reports;
 using ResourceBooking.Shared;
 using ResourceBooking.Shared.Dtos;
 using ResourceBooking.Tests.Infrastructure;
@@ -91,6 +92,51 @@ public class UtilisationTests(DbFixture fixture) : IAsyncLifetime
 
         // Open 18, 19 and 20 November, 10 hours each; Design review (18th) and Sprint planning (19th) count.
         Assert.Equal((30.0, 4.0, new DateOnly(2026, 11, 20)), (thames.Available, thames.Used, thames.LastDay));
+    }
+
+    [Fact]
+    public async Task A_resource_retired_before_the_range_still_has_a_row_with_nothing_open()
+    {
+        await using (var db = _app.Db())
+        {
+            db.Resources.Single(r => r.Id == Seed.ThamesId).LastDay = new DateOnly(2026, 11, 10);
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var thames = (await ReportAsync()).Single(r => r.ResourceId == Seed.ThamesId);
+
+        Assert.Equal((0.0, 0.0, (double?)null), (thames.Available, thames.Used, thames.Ratio));
+    }
+
+    [Fact]
+    public async Task Days_cover_one_type_and_stop_at_a_resources_last_day()
+    {
+        await using (var db = _app.Db())
+        {
+            db.Resources.Single(r => r.Id == Seed.ThamesId).LastDay = new DateOnly(2026, 11, 20);
+            await db.SaveChangesAsync(Ct);
+        }
+        await using var read = _app.Db();
+
+        var (resources, days) = await new Utilisation(read, London).ByDayAsync(new DateOnly(2026, 11, 18), new DateOnly(2026, 11, 24), ResourceType.MeetingRoom, Ct);
+
+        Assert.All(resources, r => Assert.Equal(ResourceType.MeetingRoom, r.Type));
+        Assert.Equal([new DateOnly(2026, 11, 18), new DateOnly(2026, 11, 19), new DateOnly(2026, 11, 20)],
+            days.Where(d => d.ResourceId == Seed.ThamesId).Select(d => d.Day));
+        Assert.Equal(7, days.Count(d => d.ResourceId == Seed.SevernId));
+    }
+
+    [Fact]
+    public async Task The_report_is_the_sum_of_the_days()
+    {
+        await using var read = _app.Db();
+        var (_, days) = await new Utilisation(read, London).ByDayAsync(new DateOnly(2026, 11, 18), new DateOnly(2026, 11, 24), null, Ct);
+
+        var report = await ReportAsync();
+
+        Assert.All(report, row => Assert.Equal(
+            (row.Available, row.Used),
+            (days.Where(d => d.ResourceId == row.ResourceId).Sum(d => d.Available), days.Where(d => d.ResourceId == row.ResourceId).Sum(d => d.Used))));
     }
 
     [Fact]
