@@ -32,8 +32,13 @@ public class AdminApiTests(DbFixture fixture) : IAsyncLifetime
 
     private static object PoolCar2 => new
     {
-        name = "Pool Car 2", type = "Car", capacity = 4, opensAt = "07:00", closesAt = "19:00",
-        maxDuration = "3.00:00:00", turnaround = "01:00:00",
+        name = "Pool Car 2",
+        type = "Car",
+        capacity = 4,
+        opensAt = "07:00",
+        closesAt = "19:00",
+        maxDuration = "3.00:00:00",
+        turnaround = "01:00:00",
     };
 
     // ---- access ----

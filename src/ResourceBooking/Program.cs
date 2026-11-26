@@ -24,6 +24,10 @@ builder.Services.AddDbContext<AppDb>((services, options) =>
 
 builder.Services.AddScoped<ResourceBooking.Bookings.BookingService>();
 builder.Services.AddScoped<ResourceBooking.Bookings.AvailabilityService>();
+builder.Services.AddScoped<ResourceBooking.Admin.UserAdmin>();
+builder.Services.AddScoped<ResourceBooking.Admin.ResourceAdmin>();
+builder.Services.AddScoped<ResourceBooking.Reports.Utilisation>();
+builder.Services.AddScoped<ResourceBooking.Reports.History>();
 builder.Services.AddAppAuthentication(builder.Environment);
 builder.Services.AddApiGuards();
 builder.Services.AddProblemDetails();
@@ -78,6 +82,9 @@ api.MapAdminEndpoints();
 api.MapBookingEndpoints();
 api.MapAvailabilityEndpoints();
 api.MapNoticeEndpoints();
+api.MapUserEndpoints();
+api.MapResourceEndpoints();
+api.MapReportEndpoints();
 app.MapRazorComponents<App>()
     .AddInteractiveWebAssemblyRenderMode()
     .AddAdditionalAssemblies(typeof(ResourceBooking.Client._Imports).Assembly);

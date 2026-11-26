@@ -61,8 +61,14 @@ public class UtilisationTests(DbFixture fixture) : IAsyncLifetime
             db.Resources.Add(shed);
             db.Bookings.Add(new Booking
             {
-                Id = Guid.CreateVersion7(), ResourceId = shed.Id, UserId = Seed.AnaId, Attendees = 1, Status = BookingStatus.Confirmed,
-                StartsAt = At(20, 22), EndsAt = At(21, 4), BlockedUntil = At(21, 4),
+                Id = Guid.CreateVersion7(),
+                ResourceId = shed.Id,
+                UserId = Seed.AnaId,
+                Attendees = 1,
+                Status = BookingStatus.Confirmed,
+                StartsAt = At(20, 22),
+                EndsAt = At(21, 4),
+                BlockedUntil = At(21, 4),
             });
             await db.SaveChangesAsync(Ct);
         }
