@@ -27,6 +27,8 @@ public static class ApiResults
     /// <summary>
     /// Every validation error in the request. The framework's validator skips <see cref="IValidatableObject.Validate"/>
     /// when an attribute fails, so its rules run here as well and the client hears about every field at once.
+    /// A request's own rules must therefore cope with fields its attributes would have refused (a null
+    /// [Required] field, a value out of range): they run on whatever the client sent.
     /// </summary>
     public static List<ValidationResult> Validate(object request)
     {

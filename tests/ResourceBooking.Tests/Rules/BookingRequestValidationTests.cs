@@ -81,6 +81,19 @@ public class BookingRequestValidationTests
         Assert.Equal(accepted ? [] : ["Title"], Errors(request));
     }
 
+    [Fact]
+    public void The_400_lists_each_refused_field_with_its_message()
+    {
+        var result = ApiResults.Invalid(new BookingRequest { Start = Two, Attendees = 0, Title = new string('a', 101) });
+
+        var problem = Assert.IsType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>(result);
+        var errors = Assert.IsType<Microsoft.AspNetCore.Http.HttpValidationProblemDetails>(problem.ProblemDetails).Errors;
+        Assert.Equal(400, problem.StatusCode);
+        Assert.Equal(["Attendees", "End", "ResourceId", "Title"], errors.Keys.Order());
+        Assert.Equal(["Choose an end time."], errors["End"]);
+        Assert.All(errors.Values, messages => Assert.Single(messages));
+    }
+
     // ---- level 3: the whole rule against the spec's statement of it ----
 
     /// <summary>The design's rule, written out field by field, independent of the validator.</summary>
