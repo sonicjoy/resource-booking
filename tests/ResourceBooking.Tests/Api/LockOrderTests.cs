@@ -46,6 +46,25 @@ public class LockOrderTests(DbFixture fixture) : IAsyncLifetime
         }
     }
 
+    /// <summary>Waits until at least <paramref name="count"/> sessions on this database wait for a row lock.</summary>
+    private async Task WaitForLockWaitersAsync(int count, Task? orDone = null)
+    {
+        await using var connection = new NpgsqlConnection(_app.ConnectionString);
+        await connection.OpenAsync(Ct);
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'", connection);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while ((long)(await command.ExecuteScalarAsync(Ct))! < count)
+        {
+            if (orDone is { IsCompleted: true })
+            {
+                return;
+            }
+            Assert.True(DateTime.UtcNow < deadline, $"fewer than {count} sessions ever waited for a lock");
+            await Task.Delay(25, Ct);
+        }
+    }
+
     private static object LunchTo(Guid room) =>
         new { resourceId = Seed.MainKitchenId, deliveryAt = $"{Tomorrow}T12:30", attendees = 4, deliveryRoomId = room };
 
@@ -56,7 +75,7 @@ public class LockOrderTests(DbFixture fixture) : IAsyncLifetime
         await kitchen.LockAsync("resources", Seed.MainKitchenId, "FOR UPDATE");
         var ana = await _app.SignedInAsync(Seed.AnaId);
         var order = ana.PostAsJsonAsync("/api/bookings", LunchTo(Seed.ThamesId), Ct);
-        await Task.Delay(500, Ct);
+        await WaitForLockWaitersAsync(1);
 
         var sam = await _app.SignedInAsync(Seed.SamId);
         (await sam.PostAsJsonAsync($"/api/resources/{Seed.ThamesId}/retirement", new { lastDay = "2026-11-25" }, Ct)).EnsureSuccessStatusCode();
@@ -76,10 +95,12 @@ public class LockOrderTests(DbFixture fixture) : IAsyncLifetime
         await deactivation.LockAsync("users", Seed.AnaId, "FOR NO KEY UPDATE");
         var sam = await _app.SignedInAsync(Seed.SamId);
         var order = sam.PostAsJsonAsync("/api/bookings", LunchTo(Seed.ThamesId), Ct);
-        await Task.Delay(500, Ct);
+        await WaitForLockWaitersAsync(1);
 
+        // The order now waits. With the right order it holds nothing the deactivation wants, so this returns;
+        // with the old order it holds Sam, and this waits too.
         var deactivationTakesSam = deactivation.LockAsync("users", Seed.SamId, "FOR NO KEY UPDATE");
-        await Task.Delay(300, Ct);
+        await WaitForLockWaitersAsync(2, deactivationTakesSam);
         var editTakesAna = edit.LockAsync("users", Seed.AnaId, "FOR SHARE");
 
         await deactivationTakesSam.WaitAsync(TimeSpan.FromSeconds(5), Ct);

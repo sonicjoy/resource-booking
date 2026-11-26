@@ -8,22 +8,24 @@
 (*                                                                         *)
 (* Checked: no deadlock; at least one active admin; each booking cancelled  *)
 (* at most once; no order created for a room already retired; no confirmed *)
-(* booking whose owner is inactive.                                        *)
-(* The two switches turn on mistakes a programmer might make, to show the  *)
-(* checker finds them: locking only the target user on deactivation, and   *)
-(* cascading without locking and re-checking the bookings.                 *)
+(* booking whose owner is inactive; no confirmed booking on a retired room.*)
+(* Six switches turn on mistakes a programmer might make, to show the     *)
+(* checker finds each: the old order lock order, deactivation locking only *)
+(* its target, cascades without row locks, an order reading its room before*)
+(* locking, an order without the caller lock, and retirement without the   *)
+(* resource lock.                                                          *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS LockOnlyTarget, CascadeWithoutLocks, OldOrder, OrderChecksEarly, OrderWithoutCallerLock
+CONSTANTS LockOnlyTarget, CascadeWithoutLocks, OldOrder, OrderChecksEarly, OrderWithoutCallerLock, RetireWithoutLock
 
 Admins == {"u1", "u2"}
 Users == Admins
 Rooms == {"r1", "r2"}
 Kitchen == "k"
-Booked == {"b1", "b2", "b3"}          \* b3 is created by a transaction below
-OwnerOf == [b1 |-> "u1", b2 |-> "u2", b3 |-> "u2"]
-ResourceOf == [b1 |-> "r1", b2 |-> "r1", b3 |-> "k"]
+Booked == {"b1", "b2", "b3", "b4"}    \* b3 and b4 are created by transactions below
+OwnerOf == [b1 |-> "u1", b2 |-> "u2", b3 |-> "u2", b4 |-> "u1"]
+ResourceOf == [b1 |-> "r1", b2 |-> "r1", b3 |-> "k", b4 |-> "r1"]
 
 \* PostgreSQL row-lock conflicts: FOR KEY SHARE (KS), FOR SHARE (S), FOR NO KEY UPDATE (NKU), FOR UPDATE (U).
 Conflict(m1, m2) ==
@@ -33,7 +35,7 @@ Conflict(m1, m2) ==
 
 L(row, mode) == [row |-> row, mode |-> mode]
 
-Txns == {"edit", "order", "retire", "deact1", "deact2"}
+Txns == {"edit", "order", "book", "retire", "deact1", "deact2"}
 
 \* The locks each transaction takes before it reads, in the code's order.
 \*  edit:   BookingService on b1 - resource FOR UPDATE, caller FOR SHARE, booking FOR UPDATE.
@@ -47,7 +49,8 @@ FirstLocks(t) ==
       [] t = "order"  -> IF OldOrder THEN << L(Kitchen, "U"), L("u2", "S"), L("r1", "KS") >>
                          ELSE IF OrderWithoutCallerLock THEN << L(Kitchen, "U"), L("r1", "KS") >>
                          ELSE << L(Kitchen, "U"), L("r1", "KS"), L("u2", "S") >>
-      [] t = "retire" -> << L("r1", "U") >>
+      [] t = "book"   -> << L("r1", "U"), L("u1", "S") >>
+      [] t = "retire" -> IF RetireWithoutLock THEN << >> ELSE << L("r1", "U") >>
       [] t = "deact1" -> IF LockOnlyTarget THEN << L("u1", "NKU") >> ELSE << L("u1", "NKU"), L("u2", "NKU") >>
       [] t = "deact2" -> IF LockOnlyTarget THEN << L("u2", "NKU") >> ELSE << L("u1", "NKU"), L("u2", "NKU") >>
 
@@ -95,13 +98,9 @@ Take(t) ==
 
 Release(t) == held' = [held EXCEPT ![t] = {}]
 
-SortedLocks(ids) ==
-    IF ids = {"b1", "b2"} THEN << L("b1", "NKU"), L("b2", "NKU") >>
-    ELSE IF ids = {"b1"} THEN << L("b1", "NKU") >>
-    ELSE IF ids = {"b2"} THEN << L("b2", "NKU") >>
-    ELSE IF ids = {"b3"} THEN << L("b3", "NKU") >>
-    ELSE IF ids = {"b2", "b3"} THEN << L("b2", "NKU"), L("b3", "NKU") >>
-    ELSE << L("b1", "NKU"), L("b2", "NKU"), L("b3", "NKU") >>
+IdOrder == << "b1", "b2", "b3", "b4" >>
+InIdOrder(ids) == SelectSeq(IdOrder, LAMBDA b : b \in ids)
+SortedLocks(ids) == [i \in 1..Len(InIdOrder(ids)) |-> L(InIdOrder(ids)[i], "NKU")]
 
 \* A cascade reads the matching confirmed ids without locks, then (unless the mistake is on) locks
 \* each in id order and re-checks it.
@@ -136,6 +135,13 @@ Commit(t) ==
                          /\ badOrder' = ("r1" \in retired)
                     ELSE UNCHANGED << exists, confirmed, badOrder >>
               /\ UNCHANGED << todo, picked, cancels, active, retired, seen >>
+         [] t = "book" ->
+              \* A booking of r1 by u1: refused if r1 is retired or u1 inactive (read under the locks).
+              /\ phase' = [phase EXCEPT ![t] = "done"] /\ Release(t)
+              /\ IF "u1" \in active /\ "r1" \notin retired
+                    THEN /\ exists' = exists \cup {"b4"} /\ confirmed' = confirmed \cup {"b4"}
+                    ELSE UNCHANGED << exists, confirmed >>
+              /\ UNCHANGED << todo, picked, cancels, active, retired, seen, badOrder >>
          [] t = "retire" ->
               /\ StartCascade(t, {b \in confirmed : ResourceOf[b] = "r1"})
               /\ UNCHANGED << held, exists, confirmed, cancels, active, retired, seen, badOrder >>
@@ -169,4 +175,5 @@ AtLeastOneAdmin == active \cap Admins # {}
 CancelledOnce == \A b \in Booked : cancels[b] <= 1
 NoOrderForARetiredRoom == ~badOrder
 NoBookingForAnInactiveOwner == \A b \in confirmed : OwnerOf[b] \in active
+NothingOnARetiredRoom == \A b \in confirmed : ResourceOf[b] \notin retired
 ====
