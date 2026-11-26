@@ -12,17 +12,20 @@ namespace ResourceBooking.Tests.Infrastructure;
 /// The real app on its own database with a fake clock. Start with <see cref="CreateAsync"/>;
 /// the app migrates and seeds the database on start.
 /// </summary>
-public sealed class ApiFactory(string connectionString, FakeTimeProvider clock) : WebApplicationFactory<Program>
+public sealed class ApiFactory(string connectionString, FakeTimeProvider clock, IReadOnlyDictionary<string, string>? settings = null) : WebApplicationFactory<Program>
 {
     /// <summary>Wednesday 25 November 2026, 09:00 in London.</summary>
     public static readonly DateTimeOffset DefaultNow = new(2026, 11, 25, 9, 0, 0, TimeSpan.Zero);
 
     public FakeTimeProvider Clock { get; } = clock;
+
+    /// <summary>The model the assistant talks to: scripted per test.</summary>
+    public StubChatClient Model { get; } = new();
     public string ConnectionString { get; } = connectionString;
 
-    public static async Task<ApiFactory> CreateAsync(DbFixture db, DateTimeOffset? now = null)
+    public static async Task<ApiFactory> CreateAsync(DbFixture db, DateTimeOffset? now = null, IReadOnlyDictionary<string, string>? settings = null)
     {
-        var factory = new ApiFactory(await db.CreateDatabaseAsync(), new FakeTimeProvider(now ?? DefaultNow));
+        var factory = new ApiFactory(await db.CreateDatabaseAsync(), new FakeTimeProvider(now ?? DefaultNow), settings);
         // Start the app now, so the database is migrated and seeded before the test touches it.
         _ = factory.Server;
         return factory;
@@ -31,10 +34,16 @@ public sealed class ApiFactory(string connectionString, FakeTimeProvider clock) 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Db", ConnectionString);
+        foreach (var (key, value) in settings ?? new Dictionary<string, string>())
+        {
+            builder.UseSetting(key, value);
+        }
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(Clock);
+            services.RemoveAll<Microsoft.Extensions.AI.IChatClient>();
+            services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(Model);
         });
     }
 
