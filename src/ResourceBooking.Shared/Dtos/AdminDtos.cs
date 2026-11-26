@@ -59,17 +59,18 @@ public sealed class ResourceRequest : IValidatableObject
         {
             yield return new ValidationResult("Closing must be after opening.", [nameof(ClosesAt)]);
         }
-        foreach (var (name, value, max) in new[]
+        foreach (var (name, words, value, max) in new[]
         {
-            (nameof(MinDuration), MinDuration, Year),
-            (nameof(MaxDuration), MaxDuration, Year),
-            (nameof(MinNotice), MinNotice, Year),
-            (nameof(Turnaround), Turnaround, TimeSpan.FromDays(1)),
+            (nameof(MinDuration), "The shortest booking", MinDuration, Year),
+            (nameof(MaxDuration), "The longest booking", MaxDuration, Year),
+            (nameof(MinNotice), "The notice needed", MinNotice, Year),
+            (nameof(Turnaround), "The gap between bookings", Turnaround, TimeSpan.FromDays(1)),
         })
         {
             if (value is { } span && (span <= TimeSpan.Zero || span > max))
             {
-                yield return new ValidationResult($"{name} must be more than zero and at most {max.TotalDays:0} days.", [name]);
+                var days = max.TotalDays == 1 ? "1 day" : $"{max.TotalDays:0} days";
+                yield return new ValidationResult($"{words} must be more than zero and at most {days}.", [name]);
             }
         }
         if (MinDuration is { } min && MaxDuration is { } most && most < min)

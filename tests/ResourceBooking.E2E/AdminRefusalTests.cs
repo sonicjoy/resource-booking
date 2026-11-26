@@ -98,7 +98,7 @@ public class AdminRefusalTests(AppFixture app) : IAsyncLifetime
         await form.FillInAsync("Longest booking (hours)", "1");
         await form.Button("Save").ClickAsync();
 
-        await Expect(form.Locator(".field-error").Filter(new() { HasText = "Turnaround" })).ToBeVisibleAsync();
+        await Expect(form.Locator(".field-error").Filter(new() { HasText = "The gap between bookings must be more than zero and at most 1 day." })).ToBeVisibleAsync();
         await Expect(form.Locator(".field-error").Filter(new() { HasText = "longest booking" })).ToBeVisibleAsync();
     }
 
@@ -118,5 +118,50 @@ public class AdminRefusalTests(AppFixture app) : IAsyncLifetime
         await form.Button("Save").ClickAsync();
 
         await Expect(sam.Row("Pool Car 3")).ToContainTextAsync("at most 1.5 h");
+    }
+
+    [Fact]
+    public async Task The_last_admin_demoting_themselves_is_told_why_not()
+    {
+        var sam = await app.SignInAsync("Sam");
+        await sam.GoToAsync("Users");
+        await sam.Row("sam@sonicjoy-solutions.com").Button("Edit").ClickAsync();
+        var form = sam.Modal("Edit Sam");
+        await form.FillInAsync("Role", "Employee");
+        await form.Button("Save").ClickAsync();
+
+        await Expect(form.Locator("[role=alert]")).ToContainTextAsync("There must be at least one active admin");
+    }
+
+    [Fact]
+    public async Task Saving_a_resource_unchanged_keeps_its_hours_and_rules()
+    {
+        var sam = await app.SignInAsync("Sam");
+        await sam.GoToAsync("Resources");
+        var before = await sam.Row("Main Kitchen").InnerTextAsync();
+        var carBefore = await sam.Row("Pool Car 1").InnerTextAsync();
+
+        await sam.Row("Main Kitchen").Button("Edit").ClickAsync();
+        await sam.Modal("Edit Main Kitchen").Button("Save").ClickAsync();
+        await Expect(sam.Locator("[role=status]")).ToContainTextAsync("Saved Main Kitchen");
+        await sam.Row("Pool Car 1").Button("Edit").ClickAsync();
+        await sam.Modal("Edit Pool Car 1").Button("Save").ClickAsync();
+        await Expect(sam.Locator("[role=status]")).ToContainTextAsync("Saved Pool Car 1");
+
+        Assert.Equal(before, await sam.Row("Main Kitchen").InnerTextAsync());
+        Assert.Equal(carBefore, await sam.Row("Pool Car 1").InnerTextAsync());
+    }
+
+    [Fact]
+    public async Task A_notice_under_a_quarter_hour_can_be_saved()
+    {
+        var sam = await app.SignInAsync("Sam");
+        await sam.GoToAsync("Resources");
+        await sam.Row("Thames").Button("Edit").ClickAsync();
+        var form = sam.Modal("Edit Thames");
+        await form.FillInAsync("Notice needed (hours)", "0.1");
+        await form.Button("Save").ClickAsync();
+
+        await Expect(sam.Row("Thames")).ToContainTextAsync("0.1 h notice");
     }
 }

@@ -136,6 +136,7 @@ else
         formProblem = result.Problem;
         if (result.Ok)
         {
+            error = null;
             message = editingId is null ? $"Added {result.Value!.DisplayName}." : $"Saved {result.Value!.DisplayName}.";
             editing = null;
             await LoadAsync();

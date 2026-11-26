@@ -97,12 +97,12 @@ else
             }
             @if (Uses(RuleField.MaxDuration))
             {
-                <label class="field"><span>Longest booking (hours)</span><input type="number" min="0.25" step="any" @bind="form.MaxHours" /></label>
+                <label class="field"><span>Longest booking (hours)</span><input type="number" min="0" step="any" @bind="form.MaxHours" /></label>
                 <FieldError Problem="formProblem" Field="MaxDuration" />
             }
             @if (Uses(RuleField.MinNotice))
             {
-                <label class="field"><span>Notice needed (hours)</span><input type="number" min="0.25" step="any" @bind="form.NoticeHours" /></label>
+                <label class="field"><span>Notice needed (hours)</span><input type="number" min="0" step="any" @bind="form.NoticeHours" /></label>
                 <FieldError Problem="formProblem" Field="MinNotice" />
             }
             @if (Uses(RuleField.MaxDaysAhead))
