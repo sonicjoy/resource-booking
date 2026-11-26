@@ -55,10 +55,8 @@ public static class BookingRules
             Refuse(RuleCodes.TooSoon, $"{name} needs {Notice(notice)}");
         }
 
-        // The window covers the whole booking, so a car can't be kept past it.
-        var lastLocalDay = DateOnly.FromDateTime(isKitchen ? localRuleTime : localEnd);
         if (applies.Contains(RuleField.MaxDaysAhead) && resource.MaxDaysAhead is { } daysAhead
-            && (long)lastLocalDay.DayNumber - localToday.DayNumber > daysAhead)
+            && (long)DateOnly.FromDateTime(localRuleTime).DayNumber - localToday.DayNumber > daysAhead)
         {
             Refuse(RuleCodes.TooFarAhead, $"{name} can be booked up to {daysAhead} days ahead");
         }

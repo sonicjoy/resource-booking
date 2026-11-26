@@ -233,14 +233,9 @@ public class BookingRulesTests
     }
 
     [Fact]
-    public void A_car_cannot_be_kept_beyond_the_booking_window()
-    {
-        var car = Car();
-        car.MaxDaysAhead = 30;
-        car.MaxDuration = null;
-
-        AssertOnly(Check(Room(At(29, 9), At(32, 9), 2), car), RuleCodes.TooFarAhead, "Pool Car 1 can be booked up to 30 days ahead");
-    }
+    public void A_car_picked_up_exactly_at_closing_time_is_refused() =>
+        AssertOnly(Check(Room(At(1, 19), At(2, 9), 2), Car()), RuleCodes.OutsideOpeningHours,
+            "Pool Car 1 can be picked up and returned between 07:00 and 19:00");
 
     [Fact]
     public void A_car_returned_exactly_at_closing_time_is_fine() =>

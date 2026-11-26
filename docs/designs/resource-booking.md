@@ -183,7 +183,7 @@ Tables use snake_case (EFCore.NamingConventions). Enums are stored as text. Ids 
 * `deliveryAt` and `deliveryRoomId` (catering only)
 * `proposalId` (optional)
 
-For a catering order, the server takes the day from `deliveryAt` and ignores `start` and `end`. It sets the booking's range to that local day, midnight to midnight. `deliveryRoomId` must be an active meeting room. Cancelling or retiring that room does not cancel orders delivered to it; this gap is accepted.
+For a catering order, the server takes the day from `deliveryAt` and ignores `start` and `end`. It sets the booking's range to that local day, midnight to midnight. A request whose shape doesn't match the resource returns 400: a delivery time for a room or car, or no delivery time for a kitchen. So does a time sent with an offset (it must be company-local). `deliveryRoomId` must be an active meeting room. Cancelling or retiring that room does not cancel orders delivered to it; this gap is accepted.
 
 ### Rules
 
@@ -191,9 +191,8 @@ For a catering order, the server takes the day from `deliveryAt` and ignores `st
 
 | Code | Meeting room | Car | Kitchen |
 | --- | --- | --- | --- |
-| `END_BEFORE_START` | end not after start | end not after start | not used |
-| `IN_PAST`, `TOO_SOON` (`min_notice`) | start | pick-up (start) | `deliveryAt` |
-| `TOO_FAR_AHEAD` (`max_days_ahead`) | end's day | return's day | `deliveryAt`'s day |
+| `END_BEFORE_START` | end not after start | end not after start | always passes (the server sets a whole day) |
+| `IN_PAST`, `TOO_SOON` (`min_notice`), `TOO_FAR_AHEAD` (`max_days_ahead`) | start | pick-up (start) | `deliveryAt` |
 | `OUTSIDE_OPENING_HOURS` | start and end inside hours on one local day | pick-up and return each inside hours; may span days | `deliveryAt` inside hours |
 | `TOO_SHORT`, `TOO_LONG` | duration | duration | not used |
 | `OVER_CAPACITY` | attendees ≤ seats | passengers ≤ seats | portions ≤ portions per order |
