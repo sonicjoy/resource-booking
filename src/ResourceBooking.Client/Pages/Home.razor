@@ -26,8 +26,15 @@
 
     private async Task SignOutAsync()
     {
-        var response = await Http.PostAsync("api/auth/sign-out", null);
-        signOutFailed = !response.IsSuccessStatusCode;
+        try
+        {
+            var response = await Http.PostAsync("api/auth/sign-out", null);
+            signOutFailed = !response.IsSuccessStatusCode;
+        }
+        catch (HttpRequestException)
+        {
+            signOutFailed = true;
+        }
         AuthState.Refresh();
     }
 }

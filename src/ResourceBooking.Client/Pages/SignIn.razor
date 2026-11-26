@@ -39,12 +39,31 @@ else
     private List<SignInOption>? options;
     private string? error;
 
-    protected override async Task OnInitializedAsync() =>
-        options = await Http.GetFromJsonAsync<List<SignInOption>>("api/auth/sign-in-options");
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            options = await Http.GetFromJsonAsync<List<SignInOption>>("api/auth/sign-in-options");
+        }
+        catch (HttpRequestException)
+        {
+            options = [];
+            error = "The sign-in list couldn't be loaded. Refresh to try again.";
+        }
+    }
 
     private async Task SignInAsync(Guid userId)
     {
-        var response = await Http.PostAsJsonAsync("api/auth/sign-in", new SignInRequest(userId));
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.PostAsJsonAsync("api/auth/sign-in", new SignInRequest(userId));
+        }
+        catch (HttpRequestException)
+        {
+            error = "Signing in didn't work. Try again.";
+            return;
+        }
         if (!response.IsSuccessStatusCode)
         {
             error = response.StatusCode == System.Net.HttpStatusCode.NotFound

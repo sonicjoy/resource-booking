@@ -55,7 +55,6 @@ else
 // Pages get the not-found page; API calls keep their own status code.
 app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"), pages =>
     pages.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
-app.UseSameOriginForApi();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -65,7 +64,8 @@ app.MapStaticAssets();
 app.MapHealthEndpoints();
 
 // Every /api endpoint requires a signed-in user unless it opts out with AllowAnonymous.
-var api = app.MapGroup("/api").RequireAuthorization();
+// and refuses a state-changing request from another site.
+var api = app.MapGroup("/api").RequireAuthorization().RequireSameOrigin();
 api.MapAuthEndpoints();
 api.MapAdminEndpoints();
 app.MapRazorComponents<App>()

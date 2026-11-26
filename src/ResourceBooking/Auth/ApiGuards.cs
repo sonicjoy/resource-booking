@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace ResourceBooking.Auth;
 
-/// <summary>Request-level protections for /api that sit outside any one endpoint.</summary>
+/// <summary>Protections for /api that sit outside any one endpoint.</summary>
 public static class ApiGuards
 {
     public const string ReseedLimit = "reseed";
@@ -12,36 +12,61 @@ public static class ApiGuards
         services.AddRateLimiter(options =>
         {
             // One global window: anyone can be an admin on the demo, so a per-user limit would not hold.
-            options.AddFixedWindowLimiter(ReseedLimit, window =>
+            // Demo:ReseedWindowSeconds (default 30) sets it; 0 turns it off, as end-to-end runs need.
+            options.AddPolicy(ReseedLimit, context =>
             {
-                window.PermitLimit = 1;
-                window.Window = TimeSpan.FromSeconds(30);
-                window.QueueLimit = 0;
+                var seconds = context.RequestServices.GetRequiredService<IConfiguration>().GetValue("Demo:ReseedWindowSeconds", 30);
+                return seconds <= 0
+                    ? RateLimitPartition.GetNoLimiter("all")
+                    : RateLimitPartition.GetFixedWindowLimiter("all", _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 1,
+                        Window = TimeSpan.FromSeconds(seconds),
+                        QueueLimit = 0,
+                    });
             });
-            options.OnRejected = (context, ct) =>
+            options.OnRejected = async (context, ct) =>
             {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                return new ValueTask(context.HttpContext.Response.WriteAsJsonAsync(
-                    new { code = "RATE_LIMITED", message = "Try again in a moment" }, ct));
+                var response = context.HttpContext.Response;
+                response.StatusCode = StatusCodes.Status429TooManyRequests;
+                if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+                {
+                    response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+                }
+                await Results.Problem(
+                    statusCode: StatusCodes.Status429TooManyRequests,
+                    title: "Too many requests",
+                    extensions: new Dictionary<string, object?> { ["code"] = "RATE_LIMITED", ["message"] = "Try again in a moment" })
+                    .ExecuteAsync(context.HttpContext);
             };
         });
 
     /// <summary>
-    /// Refuses a state-changing /api request sent from another site. SameSite=Strict already keeps
-    /// the cookie off such requests; this also covers browsers and requests that send no cookie rules.
-    /// A request with no Origin header (curl, server-to-server) is allowed.
+    /// Refuses a state-changing /api request whose Origin is another site. SameSite=Strict already keeps
+    /// the cookie off such requests; this also covers sign-in, which needs no cookie. A request with no
+    /// Origin (curl, server-to-server) is allowed. The Origin may match the Host, or the X-Forwarded-Host
+    /// a proxy sets: a cross-site page cannot add that header, so trusting it does not reopen the hole.
     /// </summary>
-    public static IApplicationBuilder UseSameOriginForApi(this IApplicationBuilder app) =>
-        app.Use(async (context, next) =>
+    public static RouteGroupBuilder RequireSameOrigin(this RouteGroupBuilder group) =>
+        group.AddEndpointFilter(async (context, next) =>
         {
-            var request = context.Request;
-            var unsafeMethod = !(HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method) || HttpMethods.IsOptions(request.Method));
-            if (unsafeMethod && request.Path.StartsWithSegments("/api") && request.Headers.Origin is [{ } origin]
-                && (!Uri.TryCreate(origin, UriKind.Absolute, out var uri) || !string.Equals(uri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase)))
+            var request = context.HttpContext.Request;
+            var safeMethod = HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method) || HttpMethods.IsOptions(request.Method);
+            if (!safeMethod && request.Headers.Origin is [{ } origin] && !IsOwnHost(origin, request))
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return;
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
-            await next(context);
+            return await next(context);
         });
+
+    private static bool IsOwnHost(string origin, HttpRequest request)
+    {
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+        var forwardedHost = request.Headers["X-Forwarded-Host"].ToString();
+        return string.Equals(uri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase)
+            || (forwardedHost.Length > 0 && string.Equals(uri.Authority, forwardedHost, StringComparison.OrdinalIgnoreCase));
+    }
 }
