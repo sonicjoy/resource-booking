@@ -12,8 +12,8 @@ public static class ApiResults
     /// </summary>
     public static IResult? Invalid(object request)
     {
-        var results = new List<ValidationResult>();
-        if (Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true))
+        var results = Validate(request);
+        if (results.Count == 0)
         {
             return null;
         }
@@ -22,6 +22,23 @@ public static class ApiResults
             .GroupBy(e => e.member)
             .ToDictionary(g => g.Key, g => g.Select(e => e.Item2).ToArray());
         return Results.ValidationProblem(errors);
+    }
+
+    /// <summary>
+    /// Every validation error in the request. The framework's validator skips <see cref="IValidatableObject.Validate"/>
+    /// when an attribute fails, so its rules run here as well and the client hears about every field at once.
+    /// </summary>
+    public static List<ValidationResult> Validate(object request)
+    {
+        var context = new ValidationContext(request);
+        var results = new List<ValidationResult>();
+        if (!Validator.TryValidateObject(request, context, results, validateAllProperties: true) && request is IValidatableObject rules)
+        {
+            static string Key(ValidationResult r) => $"{string.Join(",", r.MemberNames)}|{r.ErrorMessage}";
+            var seen = results.Select(Key).ToHashSet();
+            results.AddRange(rules.Validate(context).Where(r => seen.Add(Key(r))));
+        }
+        return results;
     }
 
     /// <summary>Problem Details carrying a machine-readable code, a message, and any rule violations.</summary>
