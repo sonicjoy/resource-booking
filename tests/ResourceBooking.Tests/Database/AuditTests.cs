@@ -183,6 +183,7 @@ public class AuditTests(DbFixture fixture) : IAsyncLifetime
     public async Task A_property_set_on_an_attached_stub_records_the_stored_old_value_not_the_stubs()
     {
         var room = NewRoom();
+        room.LastDay = new DateOnly(2026, 12, 31);
         await using (var db = Db())
         {
             db.Resources.Add(room);
@@ -228,21 +229,36 @@ public class AuditTests(DbFixture fixture) : IAsyncLifetime
     [Fact]
     public async Task A_cancelled_save_leaves_nothing_queued_for_the_next_one()
     {
+        await using var db = Db();
+        db.Users.Add(NewUser("Dan"));
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => db.SaveChangesAsync(cancelled.Token));
+
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Single(await EventsAsync());
+    }
+
+    [Fact]
+    public async Task Editing_a_row_deleted_underneath_is_a_concurrency_error_and_leaves_nothing_queued()
+    {
         var user = NewUser();
         await using var db = Db();
         db.Users.Add(user);
         await db.SaveChangesAsync(Ct);
-        var before = (await EventsAsync()).Count;
+        await using (var other = DbFixture.CreateDb(_connectionString))
+        {
+            await other.Database.ExecuteSqlAsync($"DELETE FROM users WHERE id = {user.Id}", Ct);
+        }
 
         user.DisplayName = "Changed";
-        using var cancelled = new CancellationTokenSource();
-        await cancelled.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => db.SaveChangesAsync(cancelled.Token));
-        await db.Entry(user).ReloadAsync(Ct);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => db.SaveChangesAsync(Ct));
+        db.Entry(user).State = EntityState.Detached;
         db.Users.Add(NewUser("Dan"));
         await db.SaveChangesAsync(Ct);
 
-        Assert.Equal(before + 1, (await EventsAsync()).Count);
+        Assert.Equal(2, (await EventsAsync()).Count);
     }
 
     [Fact]
