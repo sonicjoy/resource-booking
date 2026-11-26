@@ -14,7 +14,7 @@ public class ShellTests(AppFixture app) : IAsyncLifetime
     {
         var page = await app.SignInAsync("Ana");
 
-        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Book" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Book", Exact = true })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "My bookings" })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Users" })).ToHaveCountAsync(0);
         await Assertions.Expect(page.GetByText("London time").First).ToBeVisibleAsync();

@@ -65,7 +65,7 @@ public sealed class AppFixture : IAsyncLifetime
         var context = await Browser.NewContextAsync(new() { BaseURL = BaseUrl, Locale = "en-GB", TimezoneId = "Europe/London" });
         var page = await context.NewPageAsync();
         await page.GotoAsync("/sign-in");
-        await page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName}\b") }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") }).ClickAsync();
         await page.GetByRole(AriaRole.Heading, new() { Name = "Book" }).WaitForAsync();
         return page;
     }

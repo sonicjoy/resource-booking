@@ -36,3 +36,81 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+/* App-wide pieces shared by pages and the booking form. */
+body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--colorNeutralForeground1, #242424);
+    background: var(--colorNeutralBackground2, #fafafa);
+}
+
+main.content {
+    padding: 1rem 1.5rem 3rem;
+    max-width: 90rem;
+}
+
+.hint {
+    color: var(--colorNeutralForeground3, #616161);
+    font-size: 0.8125rem;
+}
+
+.field-error {
+    color: var(--colorPaletteRedForeground1, #b10e1c);
+    font-size: 0.8125rem;
+    margin: -0.5rem 0 0;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgb(0 0 0 / 0.35);
+    display: grid;
+    place-items: center;
+    z-index: 10;
+}
+
+.confirm {
+    background: var(--colorNeutralBackground1, #fff);
+    border-radius: 8px;
+    padding: 1.5rem;
+    width: min(26rem, calc(100vw - 2rem));
+    box-shadow: 0 8px 32px rgb(0 0 0 / 0.25);
+}
+
+.confirm h2 {
+    margin-top: 0;
+    font-size: 1.25rem;
+}
+
+.confirm .actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+table.bookings {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 1rem;
+    background: var(--colorNeutralBackground1, #fff);
+}
+
+table.bookings th,
+table.bookings td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--colorNeutralStroke2, #e0e0e0);
+}
+
+table.bookings .row-actions {
+    white-space: nowrap;
+}

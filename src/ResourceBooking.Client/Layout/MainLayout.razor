@@ -1,9 +1,49 @@
 ﻿@inherits LayoutComponentBase
+@inject ApiClient Api
+@inject MeAuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
 
-@Body
+<header class="top-bar">
+    <a class="app-name" href="">Resource booking</a>
+    <AuthorizeView>
+        <Authorized>
+            <nav aria-label="Main">
+                <NavLink href="" Match="NavLinkMatch.All">Book</NavLink>
+                <NavLink href="my-bookings">My bookings</NavLink>
+                <AuthorizeView Roles="Admin" Context="admin">
+                    <NavLink href="admin/users">Users</NavLink>
+                    <NavLink href="admin/resources">Resources</NavLink>
+                    <NavLink href="admin/utilisation">Utilisation</NavLink>
+                    <NavLink href="admin/history">History</NavLink>
+                    <NavLink href="admin/traces">Traces</NavLink>
+                </AuthorizeView>
+            </nav>
+            <div class="user">
+                <NoticesBadge />
+                <span class="who">@context.User.Identity?.Name</span>
+                <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="SignOutAsync">Sign out</FluentButton>
+            </div>
+        </Authorized>
+    </AuthorizeView>
+</header>
+
+<main class="content">
+    @Body
+</main>
+
+<FluentProviders />
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private async Task SignOutAsync()
+    {
+        await Api.SignOutAsync();
+        AuthState.Refresh();
+        Navigation.NavigateTo("sign-in");
+    }
+}

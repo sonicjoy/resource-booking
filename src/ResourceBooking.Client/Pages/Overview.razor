@@ -1,0 +1,276 @@
+@page "/"
+@attribute [Authorize]
+@inject ApiClient Api
+@inject CompanyClock Clock
+
+<PageTitle>Book</PageTitle>
+
+<h1>Book</h1>
+
+<div class="day-picker">
+    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => MoveAsync(-1)">Previous day</FluentButton>
+    <label class="field">
+        <span class="visually-hidden">Date</span>
+        <input type="date" value="@date.ToString("yyyy-MM-dd")" @onchange="PickAsync" />
+    </label>
+    <FluentButton Appearance="ButtonAppearance.Subtle" OnClick="() => MoveAsync(1)">Next day</FluentButton>
+    <span class="day-label">@date.ToString("dddd d MMMM yyyy") · London time</span>
+</div>
+
+@if (saved is not null)
+{
+    <div role="status" class="saved">
+        <FluentMessageBar Intent="MessageBarIntent.Success" AllowDismiss="false">@saved.Text</FluentMessageBar>
+        @if (saved.Booking.ResourceType == ResourceType.MeetingRoom && kitchens.Count > 0)
+        {
+            <FluentButton Appearance="ButtonAppearance.Outline" OnClick="() => AddCatering(saved.Booking)">Add catering</FluentButton>
+        }
+    </div>
+}
+@if (error is not null)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@error</FluentMessageBar></div>
+}
+
+<FluentTabs ActiveTabId="@activeTab" ActiveTabIdChanged="TabChangedAsync">
+    <FluentTab Id="rooms" Header="Rooms" />
+    <FluentTab Id="cars" Header="Cars" />
+    <FluentTab Id="catering" Header="Catering" />
+</FluentTabs>
+
+@if (day is null)
+{
+    <p>Loading…</p>
+}
+else if (Type == ResourceType.Catering)
+{
+    <div class="kitchens">
+        @foreach (var kitchen in day.Resources)
+        {
+            <FluentCard>
+                <h2>@kitchen.Name</h2>
+                <p>@kitchen.Name: @kitchen.FreeUnits of @kitchen.Units free</p>
+                <p class="hint">Up to @kitchen.Capacity portions an order@(Hours(kitchen))</p>
+                <FluentButton Appearance="ButtonAppearance.Primary" Disabled="kitchen.FreeUnits == 0" OnClick="() => Order(kitchen)">Order</FluentButton>
+            </FluentCard>
+        }
+        @if (day.Resources.Count == 0)
+        {
+            <p>No kitchens take orders on this day.</p>
+        }
+    </div>
+}
+else
+{
+    <div class="grid-scroll">
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th scope="col" class="name">@(Type == ResourceType.Car ? "Car" : "Room")</th>
+                    @foreach (var slot in slots)
+                    {
+                        <th scope="col">@(slot.Minute == 0 ? slot.ToString("HH:mm") : "")</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var resource in day.Resources)
+                {
+                    <tr>
+                        <th scope="row" class="name">@resource.Name <span class="hint">@resource.Capacity seats</span></th>
+                        @foreach (var slot in slots)
+                        {
+                            var cell = CellFor(resource, slot);
+                            <td>
+                                <button type="button" class="cell @cell.Kind" aria-label="@cell.Label" title="@cell.Label"
+                                        disabled="@(cell.Kind != "free")" @onclick="() => Open(resource, slot)">@cell.Text</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (day.Resources.Count == 0)
+        {
+            <p>Nothing of this kind can be booked on this day.</p>
+        }
+    </div>
+}
+
+@if (draft is not null)
+{
+    <BookingForm Draft="draft" Rooms="rooms" OnSaved="SavedAsync" OnCancel="() => draft = null" />
+}
+
+@code {
+    private static readonly TimeSpan Slot = TimeSpan.FromMinutes(30);
+
+    private DateOnly date;
+    private string activeTab = "rooms";
+    private AvailabilityDay? day;
+    private List<TimeOnly> slots = [];
+    private Dictionary<Guid, ResourceDto> resources = [];
+    private List<ResourceDto> rooms = [];
+    private List<ResourceDto> kitchens = [];
+    private BookingDraft? draft;
+    private Saved? saved;
+    private string? error;
+
+    private sealed record Saved(BookingDto Booking, string Text);
+
+    private sealed record Cell(string Kind, string Label, string Text);
+
+    private ResourceType Type => activeTab switch
+    {
+        "cars" => ResourceType.Car,
+        "catering" => ResourceType.Catering,
+        _ => ResourceType.MeetingRoom,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        date = Clock.Today;
+        var list = await Api.ResourcesAsync();
+        resources = list.Value?.ToDictionary(r => r.Id) ?? [];
+        rooms = resources.Values.Where(r => r.Type == ResourceType.MeetingRoom).OrderBy(r => r.Name).ToList();
+        kitchens = resources.Values.Where(r => r.Type == ResourceType.Catering).OrderBy(r => r.Name).ToList();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = await Api.AvailabilityAsync(date, Type);
+        error = result.Problem?.Message;
+        day = result.Value;
+        slots = day is null ? [] : SlotsFor(day.Resources);
+    }
+
+    private async Task MoveAsync(int days)
+    {
+        date = date.AddDays(days);
+        saved = null;
+        await LoadAsync();
+    }
+
+    private async Task PickAsync(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var picked))
+        {
+            date = picked;
+            saved = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task TabChangedAsync(string? tab)
+    {
+        if (tab is null || tab == activeTab)
+        {
+            return;
+        }
+        activeTab = tab;
+        day = null;
+        await LoadAsync();
+    }
+
+    /// <summary>Half-hour columns from the earliest opening to the latest closing; 08:00-18:00 when nothing says.</summary>
+    private static List<TimeOnly> SlotsFor(IReadOnlyList<ResourceAvailability> list)
+    {
+        var opens = list.Select(r => r.OpensAt).OfType<TimeOnly>().DefaultIfEmpty(new TimeOnly(8, 0)).Min();
+        var closes = list.Select(r => r.ClosesAt).OfType<TimeOnly>().DefaultIfEmpty(new TimeOnly(18, 0)).Max();
+        var result = new List<TimeOnly>();
+        for (var t = opens; t < closes && result.Count < 48; t = t.Add(Slot))
+        {
+            result.Add(t);
+            if (t.Add(Slot) < t)
+            {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private Cell CellFor(ResourceAvailability resource, TimeOnly slot)
+    {
+        var start = date.ToDateTime(slot);
+        var end = start + Slot;
+        var at = $"{resource.Name}, {slot:HH:mm}";
+        if ((resource.OpensAt is { } opens && slot < opens) || (resource.ClosesAt is { } closes && slot >= closes))
+        {
+            return new("closed", $"{at}, closed", "");
+        }
+        if (resource.Busy.FirstOrDefault(b => b.Start < end && start < b.End) is { } busy)
+        {
+            return busy.Mine
+                ? new("mine", $"{at}, your booking: {busy.Title ?? "untitled"}", busy.Title ?? "Yours")
+                : new("booked", $"{at}, booked", "Booked");
+        }
+        var gap = resources.TryGetValue(resource.Id, out var info) ? info.Turnaround ?? TimeSpan.Zero : TimeSpan.Zero;
+        if (gap > TimeSpan.Zero && resource.Busy.Any(b => b.End <= start && start < b.End + gap))
+        {
+            return new("gap", $"{at}, turnaround gap", "Gap");
+        }
+        if (start < Clock.Now)
+        {
+            return new("closed", $"{at}, past", "");
+        }
+        return new("free", $"{at}, free", "");
+    }
+
+    private void Open(ResourceAvailability resource, TimeOnly slot)
+    {
+        saved = null;
+        draft = new BookingDraft
+        {
+            ResourceId = resource.Id,
+            ResourceName = resource.Name,
+            Type = resource.Type,
+            Date = date,
+            Start = slot,
+            End = slot.AddHours(1),
+        };
+    }
+
+    private void Order(ResourceAvailability kitchen)
+    {
+        saved = null;
+        draft = new BookingDraft
+        {
+            ResourceId = kitchen.Id,
+            ResourceName = kitchen.Name,
+            Type = ResourceType.Catering,
+            Date = date,
+            Start = kitchen.OpensAt is { } opens && opens > new TimeOnly(12, 0) ? opens : new TimeOnly(12, 0),
+        };
+    }
+
+    private void AddCatering(BookingDto room)
+    {
+        var kitchen = kitchens[0];
+        saved = null;
+        draft = new BookingDraft
+        {
+            ResourceId = kitchen.Id,
+            ResourceName = kitchen.Name,
+            Type = ResourceType.Catering,
+            Date = DateOnly.FromDateTime(room.Start),
+            Start = TimeOnly.FromDateTime(room.Start),
+            Attendees = room.Attendees,
+            DeliveryRoomId = room.ResourceId,
+        };
+    }
+
+    private async Task SavedAsync(BookingDto booking)
+    {
+        draft = null;
+        saved = new Saved(booking, Describe(booking));
+        await LoadAsync();
+    }
+
+    private static string Describe(BookingDto b) => b.DeliveryAt is { } delivery
+        ? $"Ordered from {b.ResourceName}: {b.Attendees} portions on {delivery:ddd d MMM} at {delivery:HH:mm}."
+        : $"Booked {b.ResourceName} on {b.Start:ddd d MMM}, {b.Start:HH:mm} to {b.End:HH:mm}.";
+
+    private static string Hours(ResourceAvailability r) =>
+        r.OpensAt is { } opens && r.ClosesAt is { } closes ? $", delivered {opens:HH:mm} to {closes:HH:mm}" : "";
+}

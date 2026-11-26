@@ -18,27 +18,27 @@ public class Cuj2RuleRefusalTests(AppFixture app) : IAsyncLifetime
         await ana.GoToTomorrowAsync();
 
         await ana.Cell("Thames", "10:00").ClickAsync();
-        await ana.FillAsync("Attendees", "12");
+        await ana.FillFieldAsync("Attendees", "12");
         await ana.ConfirmAsync();
-        await Expect(ana.Form().GetByRole(AriaRole.Alert)).ToContainTextAsync("Thames seats 8");
+        await Expect(ana.Form().Locator("[role=alert]")).ToContainTextAsync("Thames seats 8");
 
-        await ana.FillAsync("Attendees", "6");
-        await ana.FillAsync("Start", "15:00");
-        await ana.FillAsync("End", "18:30");
+        await ana.FillFieldAsync("Attendees", "6");
+        await ana.FillFieldAsync("Start", "15:00");
+        await ana.FillFieldAsync("End", "18:30");
         await ana.ConfirmAsync();
-        await Expect(ana.Form().GetByRole(AriaRole.Alert)).ToContainTextAsync("Thames closes at 18:00");
-        await ana.Form().GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+        await Expect(ana.Form().Locator("[role=alert]")).ToContainTextAsync("Thames closes at 18:00");
+        await ana.Form().Button("Cancel").ClickAsync();
 
         await ana.OpenTabAsync("Cars");
-        await Expect(ana.Cell("Pool Car 1", "11:30")).ToHaveAccessibleNameAsync("Pool Car 1, 11:30, turnaround gap");
+        await Expect(ana.Cell("Pool Car 1", "11:30")).ToHaveAttributeAsync("aria-label", "Pool Car 1, 11:30, turnaround gap");
         await ana.Cell("Pool Car 1", "14:00").ClickAsync();
-        await ana.FillAsync("Attendees", "2");
-        await ana.FillAsync("Start", "11:30");
-        await ana.FillAsync("End", "13:00");
+        await ana.FillFieldAsync("Attendees", "2");
+        await ana.FillFieldAsync("Start", "11:30");
+        await ana.FillFieldAsync("End", "13:00");
         await ana.ConfirmAsync();
-        await Expect(ana.Form().GetByRole(AriaRole.Alert))
+        await Expect(ana.Form().Locator("[role=alert]"))
             .ToContainTextAsync("Pool Car 1 is booked then, or within its 60-minute gap between bookings");
-        await ana.Form().GetByRole(AriaRole.Button, new() { Name = "Cancel" }).ClickAsync();
+        await ana.Form().Button("Cancel").ClickAsync();
 
         await ana.GetByRole(AriaRole.Link, new() { Name = "My bookings" }).ClickAsync();
         var upcoming = ana.GetByRole(AriaRole.Table);
