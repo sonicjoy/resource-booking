@@ -27,6 +27,7 @@ public sealed class AuditInterceptor(TimeProvider clock, Func<Guid?> currentActo
     {
         if (eventData.Context is { } context)
         {
+            DropQueuedEvents(context);
             AddEvents(context, entry => entry.GetDatabaseValues());
         }
         return result;
@@ -37,10 +38,11 @@ public sealed class AuditInterceptor(TimeProvider clock, Func<Guid?> currentActo
     {
         if (eventData.Context is { } context)
         {
-            // Load what the database holds for entries whose old values EF doesn't know (see AddEvents).
+            DropQueuedEvents(context);
+            // Load what the database holds for every edited entity (see AddEvents).
             // Keyed by entity: EF hands out a new EntityEntry wrapper on every enumeration.
             var stored = new Dictionary<object, PropertyValues?>(ReferenceEqualityComparer.Instance);
-            foreach (var entry in Audited(context).Where(OldValuesUnknown))
+            foreach (var entry in Audited(context).Where(e => e.State == EntityState.Modified))
             {
                 stored[entry.Entity] = await entry.GetDatabaseValuesAsync(cancellationToken);
             }
@@ -64,20 +66,23 @@ public sealed class AuditInterceptor(TimeProvider clock, Func<Guid?> currentActo
 
         foreach (var entry in Audited(context).ToList())
         {
-            // An entity saved with Update() has no snapshot: EF reports its old values as equal to the new
-            // ones. Compare against what the database holds instead.
-            var stored = OldValuesUnknown(entry) ? databaseValues(entry) : null;
+            // Old values come from the database, not EF's snapshot: an entity saved with Update(), or a stub
+            // attached and then edited, has no real snapshot. A row already gone has nothing to compare.
+            var stored = entry.State == EntityState.Modified ? databaseValues(entry) : null;
+            if (entry.State == EntityState.Modified && stored is null)
+            {
+                continue;
+            }
             var changes = new Dictionary<string, object?[]>();
             foreach (var property in entry.Properties.Where(p => p.Metadata.Name != "Id"))
             {
-                var before = stored is not null ? stored[property.Metadata] : property.OriginalValue;
                 if (entry.State == EntityState.Added)
                 {
                     changes[property.Metadata.Name] = [null, property.CurrentValue];
                 }
-                else if ((property.IsModified || stored is not null) && !Equals(before, property.CurrentValue))
+                else if (property.IsModified && !Equals(stored![property.Metadata], property.CurrentValue))
                 {
-                    changes[property.Metadata.Name] = [before, property.CurrentValue]; // [old, new], read by HistoryLabels
+                    changes[property.Metadata.Name] = [stored[property.Metadata], property.CurrentValue]; // [old, new], read by HistoryLabels
                 }
             }
             if (changes.Count == 0)
@@ -105,12 +110,10 @@ public sealed class AuditInterceptor(TimeProvider clock, Func<Guid?> currentActo
             .Where(e => e.Entity is User or Resource or Booking && e.State is EntityState.Added or EntityState.Modified);
     }
 
-    /// <summary>True for an entity attached with Update(): every property is marked modified with an unchanged value.</summary>
-    private static bool OldValuesUnknown(EntityEntry entry) =>
-        entry.State == EntityState.Modified
-        && entry.Properties.Where(p => !p.Metadata.IsPrimaryKey()).All(p => p.IsModified && Equals(p.OriginalValue, p.CurrentValue));
-
-    /// <summary>A failed save leaves its audit events queued; drop them so a retry doesn't write events for changes that never happened.</summary>
+    /// <summary>
+    /// A save that didn't commit (failed, cancelled, or a concurrency conflict) leaves its audit events queued.
+    /// This interceptor is their only writer, so any queued at the start of a save are left over: drop them.
+    /// </summary>
     private static void DropQueuedEvents(DbContext? context)
     {
         foreach (var queued in context?.ChangeTracker.Entries<AuditEvent>().Where(e => e.State == EntityState.Added).ToList() ?? [])
