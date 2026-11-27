@@ -126,7 +126,7 @@ else
     private void TabChanged(string? tab)
     {
         // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
-        if (tab is null || tab == TypeTabs.Of(type) || !(TypeTabs.IsOn(Navigation, "") || TypeTabs.IsOn(Navigation, "month")))
+        if (tab is null || tab == TypeTabs.Of(type) || !TypeTabs.IsOn(Navigation, "", "month"))
         {
             return;
         }

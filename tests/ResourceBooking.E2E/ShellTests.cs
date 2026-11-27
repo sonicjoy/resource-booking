@@ -45,11 +45,13 @@ public class ShellTests(AppFixture app) : IAsyncLifetime
         await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex(@"/\?type=Catering&year=\d+&month=\d+$"));
     }
 
-    [Fact]
-    public async Task Book_tabs_work_whatever_the_case_of_its_address()
+    [Theory]
+    [InlineData("/Book")]
+    [InlineData("/book/")]
+    public async Task Book_tabs_work_whatever_the_case_or_trailing_slash_of_its_address(string path)
     {
         var page = await app.SignInAsync("Ana");
-        await page.GotoAsync("/Book");
+        await page.GotoAsync(path);
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Book" })).ToBeVisibleAsync();
 
         await page.OpenTabAsync("Cars");

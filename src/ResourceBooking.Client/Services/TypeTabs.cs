@@ -31,7 +31,13 @@ public static class TypeTabs
     public static string BookLink(DateOnly date, ResourceType type) =>
         string.Create(CultureInfo.InvariantCulture, $"book?date={date:yyyy-MM-dd}&type={type}");
 
-    /// <summary>True while the address is still the given page ("book" for Book; "" or "month" for Month), in any case, as routes match.</summary>
-    public static bool IsOn(NavigationManager navigation, string page) =>
-        string.Equals(navigation.ToBaseRelativePath(navigation.Uri).Split('?', '#')[0], page, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// True while the address is still one of the page's routes ("book" for Book; "" and "month" for Month). Matches as
+    /// the router does: any case, with or without a trailing slash.
+    /// </summary>
+    public static bool IsOn(NavigationManager navigation, params string[] routes)
+    {
+        var path = navigation.ToBaseRelativePath(navigation.Uri).Split('?', '#')[0].TrimEnd('/');
+        return routes.Any(route => string.Equals(path, route, StringComparison.OrdinalIgnoreCase));
+    }
 }
