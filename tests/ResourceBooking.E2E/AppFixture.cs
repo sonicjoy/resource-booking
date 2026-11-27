@@ -79,8 +79,17 @@ public sealed class AppFixture : IAsyncLifetime
         return http;
     }
 
-    /// <summary>A fresh browser context signed in as the given seeded user through the sign-in page, landed on Book.</summary>
+    /// <summary>A fresh browser context signed in as the given seeded user through the sign-in page, then on Book.</summary>
     public async Task<IPage> SignInAsync(string displayName, string browserZone = "Europe/London")
+    {
+        var page = await LandAsync(displayName, browserZone);
+        await page.GetByRole(AriaRole.Link, new() { Name = "Book", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Heading, new() { Name = "Book" }).WaitForAsync();
+        return page;
+    }
+
+    /// <summary>A fresh browser context signed in as the given seeded user, left on the page sign-in lands on (Month).</summary>
+    public async Task<IPage> LandAsync(string displayName, string browserZone = "Europe/London")
     {
         var context = await Browser.NewContextAsync(new() { BaseURL = BaseUrl, Locale = "en-GB", TimezoneId = browserZone });
         var page = await context.NewPageAsync();
@@ -88,7 +97,7 @@ public sealed class AppFixture : IAsyncLifetime
         var user = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") });
         await WaitForSignInListAsync(page, user, displayName);
         await user.ClickAsync();
-        await page.GetByRole(AriaRole.Heading, new() { Name = "Book" }).WaitForAsync();
+        await page.GetByRole(AriaRole.Heading, new() { Name = "Month", Level = 1 }).WaitForAsync();
         return page;
     }
 

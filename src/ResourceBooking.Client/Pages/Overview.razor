@@ -1,4 +1,4 @@
-@page "/"
+@page "/book"
 @attribute [Authorize]
 @inject ApiClient Api
 @inject CompanyClock Clock
@@ -137,7 +137,7 @@ else
 
     private ResourceType Type => TypeTabs.TypeOf(activeTab);
 
-    // A link such as /?date=2026-12-03&type=Car (from Month) opens that day and type; anything unreadable falls back to today and rooms.
+    // A link such as /book?date=2026-12-03&type=Car (from Month) opens that day and type; anything unreadable falls back to today and rooms.
     [SupplyParameterFromQuery(Name = "date")]
     public string? DateQuery { get; set; }
 
@@ -214,7 +214,7 @@ else
     private async Task TabChangedAsync(string? tab)
     {
         // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
-        if (tab is null || tab == activeTab || !TypeTabs.IsOn(Navigation, ""))
+        if (tab is null || tab == activeTab || !TypeTabs.IsOn(Navigation, "book"))
         {
             return;
         }

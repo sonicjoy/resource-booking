@@ -54,7 +54,7 @@ public class Cuj6AssistantTests(AppFixture app) : IAsyncLifetime
 
         // Reviewing opens the form pre-filled; closing it books nothing.
         await proposals.Nth(0).Button("Review").ClickAsync();
-        await Expect(ana).ToHaveURLAsync(new Regex($"\\?date={Tomorrow}&type=MeetingRoom$"));
+        await Expect(ana).ToHaveURLAsync(new Regex($"/book\\?date={Tomorrow}&type=MeetingRoom$"));
         await Expect(ana.Form().GetByLabel("Start", new() { Exact = true })).ToHaveValueAsync("09:00");
         await Expect(ana.Form().GetByLabel("End", new() { Exact = true })).ToHaveValueAsync("12:00");
         await ana.Form().Button("Cancel").ClickAsync();

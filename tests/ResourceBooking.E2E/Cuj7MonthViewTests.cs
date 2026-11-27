@@ -55,6 +55,7 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
         }
 
         await ana.DayLink(tenth).ClickAsync();
+        await Expect(ana).ToHaveURLAsync($"{app.BaseUrl}/book?date={Iso(tenth)}&type=MeetingRoom");
         await Expect(ana.Locator(".day-label")).ToContainTextAsync(tenth.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture));
         await Expect(ana.GetByRole(AriaRole.Tab, new() { Name = "Rooms", Exact = true })).ToHaveAttributeAsync("aria-selected", "true");
         await Expect(ana.Cell("Thames", "10:00")).ToHaveAttributeAsync("aria-label", "Thames, 10:00, your booking: Planning day");
@@ -87,7 +88,7 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
         await BookAsync(Seed.AnaId, Seed.ThamesId, Tomorrow, 10, 11, "Board prep");
 
         var ben = await app.SignInAsync("Ben");
-        await ben.GotoAsync($"{app.BaseUrl}/?date={Iso(Tomorrow)}&type=MeetingRoom");
+        await ben.GotoAsync($"{app.BaseUrl}/book?date={Iso(Tomorrow)}&type=MeetingRoom");
 
         await Expect(ben.Cell("Thames", "10:00")).ToHaveAttributeAsync("aria-label", "Thames, 10:00, booked");
         await Expect(ben.Cell("Thames", "10:00")).ToHaveTextAsync("Booked");
@@ -99,7 +100,7 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
     public async Task The_catering_tab_says_what_its_numbers_count()
     {
         var ana = await app.SignInAsync("Ana");
-        await ana.GotoAsync($"{app.BaseUrl}/?date={Iso(Tomorrow.AddDays(7))}&type=Catering");
+        await ana.GotoAsync($"{app.BaseUrl}/book?date={Iso(Tomorrow.AddDays(7))}&type=Catering");
 
         await Expect(ana.GetByText("Main Kitchen: 5 of 5 orders left on this day")).ToBeVisibleAsync();
         await Expect(ana.GetByText("Takes 5 orders a day, up to 25 portions each, delivered 08:00 to 16:00.")).ToBeVisibleAsync();
@@ -115,7 +116,7 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
         await ana.GoToAsync("Month");
         await ana.WaitForTimeoutAsync(1000);
 
-        await Expect(ana).ToHaveURLAsync($"{app.BaseUrl}/month");
+        await Expect(ana).ToHaveURLAsync($"{app.BaseUrl}/");
         await Expect(ana.GetByRole(AriaRole.Tab, new() { Name = "Rooms", Exact = true })).ToHaveAttributeAsync("aria-selected", "true");
     }
 
@@ -134,7 +135,7 @@ public class Cuj7MonthViewTests(AppFixture app) : IAsyncLifetime
     public async Task A_link_with_a_bad_date_or_type_opens_today_on_rooms()
     {
         var ana = await app.SignInAsync("Ana");
-        await ana.GotoAsync($"{app.BaseUrl}/?date=someday&type=Spaceship");
+        await ana.GotoAsync($"{app.BaseUrl}/book?date=someday&type=Spaceship");
 
         await Expect(ana.Locator(".day-label")).ToContainTextAsync(Pages.LondonToday().ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture));
         await Expect(ana.GetByRole(AriaRole.Tab, new() { Name = "Rooms", Exact = true })).ToHaveAttributeAsync("aria-selected", "true");

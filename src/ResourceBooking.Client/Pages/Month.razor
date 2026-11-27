@@ -1,3 +1,4 @@
+@page "/"
 @page "/month"
 @attribute [Authorize]
 @using System.Globalization
@@ -125,7 +126,7 @@ else
     private void TabChanged(string? tab)
     {
         // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
-        if (tab is null || tab == TypeTabs.Of(type) || !TypeTabs.IsOn(Navigation, "month"))
+        if (tab is null || tab == TypeTabs.Of(type) || !TypeTabs.IsOn(Navigation, "", "month"))
         {
             return;
         }
@@ -134,7 +135,7 @@ else
 
     // The type and month live in the address, so Back and reload show the same month; the new parameters load it.
     private void Show(DateOnly wantedFirst, ResourceType wantedType) =>
-        Navigation.NavigateTo(string.Create(CultureInfo.InvariantCulture, $"month?type={wantedType}&year={wantedFirst.Year}&month={wantedFirst.Month}"));
+        Navigation.NavigateTo(string.Create(CultureInfo.InvariantCulture, $"./?type={wantedType}&year={wantedFirst.Year}&month={wantedFirst.Month}"));
 
     // The figure ("45%", "3 of 5") always shows; narrow screens drop the unit, which the link's name keeps.
     private (string Figure, string Unit) Text(DayShare d)

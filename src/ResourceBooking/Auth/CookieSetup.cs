@@ -31,7 +31,7 @@ public static class CookieSetup
                 options.SlidingExpiration = true;
 
                 // API calls get status codes, never a redirect. A page the browser asks for (one marked
-                // [Authorize]) sends a signed-out visitor to sign-in and someone without the role to Book.
+                // [Authorize]) sends a signed-out visitor to sign-in and someone without the role to Month.
                 options.Events.OnRedirectToLogin = context => Challenge(context, StatusCodes.Status401Unauthorized, "/sign-in");
                 options.Events.OnRedirectToAccessDenied = context => Challenge(context, StatusCodes.Status403Forbidden, "/");
                 options.Events.OnValidatePrincipal = ValidateAsync;

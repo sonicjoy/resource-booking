@@ -59,6 +59,6 @@ public class Cuj3AdminSetupTests(AppFixture app) : IAsyncLifetime
 
         await Expect(ana.GetByRole(AriaRole.Link, new() { Name = "Users", Exact = true })).ToHaveCountAsync(0);
         await ana.GotoAsync("/admin/users");
-        await Expect(ana.GetByRole(AriaRole.Heading, new() { Name = "Book" })).ToBeVisibleAsync();
+        await Expect(ana.GetByRole(AriaRole.Heading, new() { Name = "Month", Level = 1 })).ToBeVisibleAsync();
     }
 }
