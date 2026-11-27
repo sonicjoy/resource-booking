@@ -348,8 +348,8 @@ Simple layouts built from stock Fluent UI components. All times are shown in the
 
 * **Shell.**
   * A top bar holds the app name, navigation by role, a notices badge and a user menu with Sign out.
-  * Employees see Book, Month and My bookings. Admins also see Users, Resources, Utilisation, History and Traces.
-  * Everyone lands on Book.
+  * Employees see Month, Book and My bookings. Admins also see Users, Resources, Utilisation, History and Traces.
+  * Everyone lands on Month (at "/"; Book is at "/book").
 * **Sign-in.** A card lists the seeded users, grouped by role, and clicking one signs in. The card is labelled "Demo sign-in, standing in for company SSO".
 * **Book (overview).** A date picker with previous-day and next-day buttons, and tabs for Rooms, Cars and Catering.
   * **Rooms and Cars:** a grid with one row per resource (name and seats) and one column per half-hour.
