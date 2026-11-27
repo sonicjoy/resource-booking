@@ -31,7 +31,7 @@ public static class TypeTabs
     public static string BookLink(DateOnly date, ResourceType type) =>
         string.Create(CultureInfo.InvariantCulture, $"book?date={date:yyyy-MM-dd}&type={type}");
 
-    /// <summary>True while the address is still the given page ("book" for Book; "" or "month" for Month).</summary>
+    /// <summary>True while the address is still the given page ("book" for Book; "" or "month" for Month), in any case, as routes match.</summary>
     public static bool IsOn(NavigationManager navigation, string page) =>
-        navigation.ToBaseRelativePath(navigation.Uri).Split('?', '#')[0] == page;
+        string.Equals(navigation.ToBaseRelativePath(navigation.Uri).Split('?', '#')[0], page, StringComparison.OrdinalIgnoreCase);
 }

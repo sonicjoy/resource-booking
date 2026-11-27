@@ -41,6 +41,20 @@ public class ShellTests(AppFixture app) : IAsyncLifetime
 
         await page.GotoAsync("/month");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Month", Level = 1 })).ToBeVisibleAsync();
+        await page.OpenTabAsync("Catering");
+        await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex(@"/\?type=Catering&year=\d+&month=\d+$"));
+    }
+
+    [Fact]
+    public async Task Book_tabs_work_whatever_the_case_of_its_address()
+    {
+        var page = await app.SignInAsync("Ana");
+        await page.GotoAsync("/Book");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Book" })).ToBeVisibleAsync();
+
+        await page.OpenTabAsync("Cars");
+
+        await Assertions.Expect(page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex("type=Car$"));
     }
 
     [Fact]
@@ -57,6 +71,7 @@ public class ShellTests(AppFixture app) : IAsyncLifetime
 
     [Theory]
     [InlineData("/")]
+    [InlineData("/book")]
     [InlineData("/my-bookings")]
     public async Task A_signed_out_visitor_is_sent_to_sign_in(string path)
     {
