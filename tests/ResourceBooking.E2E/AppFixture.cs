@@ -85,9 +85,77 @@ public sealed class AppFixture : IAsyncLifetime
         var context = await Browser.NewContextAsync(new() { BaseURL = BaseUrl, Locale = "en-GB", TimezoneId = browserZone });
         var page = await context.NewPageAsync();
         await page.GotoAsync("/sign-in");
-        await page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") }).ClickAsync();
+        var user = page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex($"^{displayName} ") });
+        await WaitForSignInListAsync(page, user, displayName);
+        await user.ClickAsync();
         await page.GetByRole(AriaRole.Heading, new() { Name = "Book" }).WaitForAsync();
         return page;
+    }
+
+    /// <summary>
+    /// Waits for the sign-in list in three steps, so a failure says which one broke. Prerendering is off, so the
+    /// "Sign in" heading appears only once the WebAssembly app has started; a fresh browser context downloads it
+    /// again, and CI twice timed out here (suspected slow start, not confirmed). That step allows 45 s and reloads
+    /// once, writing the reload to the test output so a rescued sign-in leaves a trace. Then the list or the page's
+    /// own error, then the named user.
+    /// </summary>
+    private static async Task WaitForSignInListAsync(IPage page, ILocator user, string displayName)
+    {
+        var started = page.GetByRole(AriaRole.Heading, new() { Name = "Sign in", Level = 1 });
+        try
+        {
+            await started.WaitForAsync(new() { Timeout = 45_000 });
+        }
+        catch (TimeoutException)
+        {
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"Sign-in page hadn't started after 45 s at {page.Url}; reloading once. The page showed: {await ShownAsync(page)}");
+            try
+            {
+                await page.ReloadAsync();
+                await started.WaitForAsync(new() { Timeout = 45_000 });
+            }
+            catch (TimeoutException e)
+            {
+                throw new TimeoutException($"The app never started on the sign-in page, even after a reload. The page showed: {await ShownAsync(page)}", e);
+            }
+        }
+
+        var alert = page.Locator("[role=alert]");
+        try
+        {
+            await page.Locator("ul.people button, [role=alert]").First.WaitForAsync(new() { Timeout = 30_000 });
+        }
+        catch (TimeoutException e)
+        {
+            throw new TimeoutException($"The app started but the sign-in list never arrived. The page showed: {await ShownAsync(page)}", e);
+        }
+        if (await alert.CountAsync() > 0)
+        {
+            throw new InvalidOperationException($"The sign-in list failed to load: {await alert.First.InnerTextAsync()}");
+        }
+
+        try
+        {
+            await user.WaitForAsync(new() { Timeout = 5_000 });
+        }
+        catch (TimeoutException e)
+        {
+            throw new InvalidOperationException($"No sign-in button for {displayName}. The list shows: {await ShownAsync(page)}", e);
+        }
+    }
+
+    private static async Task<string> ShownAsync(IPage page)
+    {
+        try
+        {
+            var text = await page.Locator("body").InnerTextAsync(new() { Timeout = 5_000 });
+            return text.Length > 500 ? text[..500] : text;
+        }
+        catch (PlaywrightException e)
+        {
+            return $"(couldn't read the page: {e.Message})";
+        }
     }
 
     private sealed class Factory(string connectionString, IChatClient model) : WebApplicationFactory<Program>

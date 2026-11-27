@@ -461,7 +461,29 @@ public class BookingApiTests(DbFixture fixture) : IAsyncLifetime
         Assert.Equal((new DateTime(2026, 11, 26, 9, 0, 0), new DateTime(2026, 11, 26, 11, 0, 0)), (block.Start, block.End));
         Assert.Equal((false, null, null), (block.Mine, block.Title, block.Owner));
         var forSam = Assert.Single(Assert.Single(asSam!.Resources).Busy);
-        Assert.Equal(("Ben", "Site visit"), (forSam.Owner, forSam.Title));
+        Assert.Equal((false, null, "Ben"), (forSam.Mine, forSam.Title, forSam.Owner));
+    }
+
+    [Fact]
+    public async Task Availability_never_sends_an_admin_someone_elses_title()
+    {
+        var sam = await _app.SignedInAsync(Seed.SamId);
+
+        var response = await sam.GetStringAsync($"/api/availability?date={Tomorrow}&type=Car", Ct);
+
+        Assert.Contains("\"Ben\"", response);
+        Assert.DoesNotContain("Site visit", response);
+    }
+
+    [Fact]
+    public async Task Availability_gives_the_owner_their_title_and_no_owner_name()
+    {
+        var ben = await _app.SignedInAsync(Seed.BenId);
+
+        var asBen = await ben.GetFromJsonAsync<AvailabilityDay>($"/api/availability?date={Tomorrow}&type=Car", Ct);
+
+        var block = Assert.Single(Assert.Single(asBen!.Resources).Busy);
+        Assert.Equal((true, "Site visit", null), (block.Mine, block.Title, block.Owner));
     }
 
     [Fact]

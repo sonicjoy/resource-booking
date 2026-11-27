@@ -15,7 +15,7 @@ public sealed record BookingDto(
     Guid? DeliveryRoomId,
     BookingStatus Status);
 
-/// <summary>A busy stretch on the overview. Owner and title are shown only to admins and to the booking's owner.</summary>
+/// <summary>A busy stretch on the Book grid. The title goes only to its owner; the owner's name only to admins, for others' bookings.</summary>
 public sealed record BusyBlock(DateTime Start, DateTime End, bool Mine, string? Title, string? Owner);
 
 public sealed record ResourceAvailability(
@@ -48,3 +48,10 @@ public sealed record ResourceDto(
     int? MaxFuturePerUser);
 
 public sealed record NoticeDto(Guid Id, Guid BookingId, string Message, DateTime CreatedAt, bool Read);
+
+/// <summary>One calendar day of the month view: summed used and available amounts across a type's resources
+/// (hours for rooms and cars, orders for kitchens). <see cref="Share"/> is null when nothing is open.</summary>
+public sealed record DayShare(DateOnly Date, double Used, double Available, double? Share);
+
+/// <summary>The month view for one type (design: month-view §3). Totals only, the same for every caller.</summary>
+public sealed record MonthOccupancy(int Year, int Month, ResourceType Type, IReadOnlyList<DayShare> Days);

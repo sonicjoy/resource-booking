@@ -1,0 +1,163 @@
+@page "/month"
+@attribute [Authorize]
+@using System.Globalization
+@inject ApiClient Api
+@inject CompanyClock Clock
+@inject NavigationManager Navigation
+
+@*
+    The month view (design: month-view §4): how busy one type is on each day of a calendar month. Each day links
+    to Book at that date and type. Totals only, so every caller sees the same page.
+*@
+<PageTitle>Month</PageTitle>
+
+<h1>Month</h1>
+
+<div class="month-picker">
+    <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(first.AddMonths(-1).Year < CalendarRange.FirstYear)" OnClick="() => Move(-1)">Previous month</FluentButton>
+    <h2 class="month-name">@first.ToString("MMMM yyyy", CultureInfo.InvariantCulture)</h2>
+    <FluentButton Appearance="ButtonAppearance.Subtle" Disabled="@(first.AddMonths(1).Year > CalendarRange.LastYear)" OnClick="() => Move(1)">Next month</FluentButton>
+</div>
+
+<FluentTabs ActiveTabId="@TypeTabs.Of(type)" ActiveTabIdChanged="TabChanged">
+    <FluentTab Id="rooms" Header="Rooms" />
+    <FluentTab Id="cars" Header="Cars" />
+    <FluentTab Id="catering" Header="Catering" />
+</FluentTabs>
+
+@if (problem is not null)
+{
+    <div role="alert"><FluentMessageBar Intent="MessageBarIntent.Error" AllowDismiss="false">@problem</FluentMessageBar></div>
+}
+
+@if (month is null)
+{
+    @if (problem is null)
+    {
+        <p>Loading…</p>
+    }
+}
+else
+{
+    <ol class="legend" aria-label="Legend">
+        <li><span class="swatch band-0"></span>Under 25%</li>
+        <li><span class="swatch band-1"></span>25 to 49%</li>
+        <li><span class="swatch band-2"></span>50 to 74%</li>
+        <li><span class="swatch band-3"></span>75% and over</li>
+    </ol>
+    <div class="calendar">
+        @foreach (var name in WeekDays)
+        {
+            <div class="weekday" aria-hidden="true">@name</div>
+        }
+        @for (var i = 0; i < Lead; i++)
+        {
+            <div class="blank"></div>
+        }
+        @foreach (var d in month.Days)
+        {
+            var (figure, unit) = Text(d);
+            var text = figure + unit;
+            <a class="day @Band(d) @(d.Date < Clock.Today ? "past" : "") @(d.Date == Clock.Today ? "today" : "")"
+               href="@TypeTabs.BookLink(d.Date, type)" aria-label="@($"{d.Date.ToString("dddd d MMMM", CultureInfo.InvariantCulture)}, {text}")"
+               aria-current="@(d.Date == Clock.Today ? "date" : null)">
+                <span class="number">@d.Date.Day</span>
+                <span class="share">@figure<span class="unit">@unit</span></span>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private static readonly string[] WeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeQuery { get; set; }
+
+    // Strings, not ints: Blazor throws on a query value it can't parse, and a hand-edited link shouldn't break the page.
+    [SupplyParameterFromQuery(Name = "year")]
+    public string? YearQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "month")]
+    public string? MonthQuery { get; set; }
+
+    private DateOnly first;
+    private ResourceType type = ResourceType.MeetingRoom;
+    private MonthOccupancy? month;
+    private string? problem;
+    private int load;
+
+    // Monday-first: blank cells before the 1st.
+    private int Lead => ((int)first.DayOfWeek + 6) % 7;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var wantedType = TypeTabs.Parse(TypeQuery);
+        var wantedFirst = int.TryParse(YearQuery, NumberStyles.None, CultureInfo.InvariantCulture, out var y) && y is >= CalendarRange.FirstYear and <= CalendarRange.LastYear
+            && int.TryParse(MonthQuery, NumberStyles.None, CultureInfo.InvariantCulture, out var m) && m is >= 1 and <= 12
+            ? new DateOnly(y, m, 1)
+            : new DateOnly(Clock.Today.Year, Clock.Today.Month, 1);
+        if (load > 0 && wantedType == type && wantedFirst == first)
+        {
+            return;
+        }
+        (type, first) = (wantedType, wantedFirst);
+        await LoadAsync();
+    }
+
+    /// <summary>Loads the shown month; a slower answer for a month shown earlier is dropped.</summary>
+    private async Task LoadAsync()
+    {
+        var mine = ++load;
+        month = null;
+        problem = null;
+        var result = await Api.MonthAsync(first.Year, first.Month, type);
+        if (mine != load)
+        {
+            return;
+        }
+        problem = result.Problem?.Message;
+        month = result.Value;
+    }
+
+    private void Move(int months) => Show(first.AddMonths(months), type);
+
+    private void TabChanged(string? tab)
+    {
+        // Fluent tabs also report a change while they are being removed on the way to another page; ignore those.
+        if (tab is null || tab == TypeTabs.Of(type) || !TypeTabs.IsOn(Navigation, "month"))
+        {
+            return;
+        }
+        Show(first, TypeTabs.TypeOf(tab));
+    }
+
+    // The type and month live in the address, so Back and reload show the same month; the new parameters load it.
+    private void Show(DateOnly wantedFirst, ResourceType wantedType) =>
+        Navigation.NavigateTo(string.Create(CultureInfo.InvariantCulture, $"month?type={wantedType}&year={wantedFirst.Year}&month={wantedFirst.Month}"));
+
+    // The figure ("45%", "3 of 5") always shows; narrow screens drop the unit, which the link's name keeps.
+    private (string Figure, string Unit) Text(DayShare d)
+    {
+        if (d.Share is not { } share)
+        {
+            return ("Closed", "");
+        }
+        var percent = Math.Round(share * 100, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture) + "%";
+        return type switch
+        {
+            ResourceType.Car => (percent, " of car hours booked"),
+            ResourceType.Catering => (string.Create(CultureInfo.InvariantCulture, $"{d.Used:0} of {d.Available:0}"), " kitchen orders taken"),
+            _ => (percent, " of room hours booked"),
+        };
+    }
+
+    // Bands follow the rounded figure shown, so "25%" is never shaded as under 25%.
+    private static string Band(DayShare d) => d.Share is not { } share ? "closed" : Math.Round(share * 100, MidpointRounding.AwayFromZero) switch
+    {
+        < 25 => "band-0",
+        < 50 => "band-1",
+        < 75 => "band-2",
+        _ => "band-3",
+    };
+}

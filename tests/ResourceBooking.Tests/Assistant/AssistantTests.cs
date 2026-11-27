@@ -76,6 +76,41 @@ public class AssistantTests(DbFixture fixture) : IAsyncLifetime
         Assert.DoesNotContain("Site visit", tool.Payload);
     }
 
+    // Design: month-view §1. Whoever asks, admin or not, no tool result carries someone else's name or title.
+    [Theory]
+    [InlineData("0193a000-0000-7000-8000-000000000001")] // Ana, an employee
+    [InlineData("0193a000-0000-7000-8000-000000000003")] // Sam, an admin
+    public async Task No_tool_result_carries_someone_elses_name_or_title(string caller)
+    {
+        Guid bens;
+        await using (var db = _app.Db())
+        {
+            bens = (await db.Bookings.SingleAsync(b => b.Title == "Site visit", Ct)).Id;
+        }
+        _app.Model.On("anything about the car", "Here is what I found.",
+            Call("find_free_resources", new { type = "Car", start = $"{Tomorrow}T09:00", end = $"{Tomorrow}T11:00", attendees = 1 }),
+            Call("get_my_bookings", new { }),
+            Call("propose_booking", new { resourceId = Seed.PoolCar1Id, start = $"{Tomorrow}T09:30", end = $"{Tomorrow}T10:30", attendees = 1 }),
+            Call("propose_change", new { bookingId = bens, start = $"{Tomorrow}T13:00", end = $"{Tomorrow}T14:00" }),
+            Call("propose_cancellation", new { bookingId = bens }));
+        var client = await _app.SignedInAsync(Guid.Parse(caller));
+
+        await ReplyAsync(await SayAsync(client, "anything about the car tomorrow?"));
+
+        await using var check = _app.Db();
+        var callerId = Guid.Parse(caller);
+        var others = await check.Users.Where(u => u.Id != callerId).Select(u => u.DisplayName).ToListAsync(Ct);
+        var theirTitles = await check.Bookings.Where(b => b.UserId != callerId && b.Title != null).Select(b => b.Title!).ToListAsync(Ct);
+        var results = await check.AssistantSteps.Where(s => s.Kind == StepKind.ToolCall).Select(s => s.Payload).ToListAsync(Ct);
+        Assert.Equal(5, results.Count);
+        Assert.Contains("Site visit", theirTitles);
+        Assert.All(results, payload =>
+        {
+            Assert.All(theirTitles, title => Assert.DoesNotContain(title, payload));
+            Assert.All(others, name => Assert.DoesNotMatch($@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b", payload));
+        });
+    }
+
     public static TheoryData<string, object, string> Refused => new()
     {
         { "a busy slot", new { resourceId = Seed.PoolCar1Id, start = $"{Tomorrow}T09:30", end = $"{Tomorrow}T10:30", attendees = 2 }, "booked then" },

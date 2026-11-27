@@ -35,9 +35,8 @@ public sealed class AvailabilityService(AppDb db, TimeZoneInfo zone)
             }
             var busy = own.Select(b =>
             {
-                var mine = b.UserId == callerId;
-                return new BusyBlock(CompanyTime.ToLocal(b.StartsAt, zone), CompanyTime.ToLocal(b.EndsAt, zone), mine,
-                    mine || isAdmin ? b.Title : null, isAdmin ? b.User!.DisplayName : null);
+                var (mine, title, owner) = BookingVisibility.Project(b, callerId, isAdmin);
+                return new BusyBlock(CompanyTime.ToLocal(b.StartsAt, zone), CompanyTime.ToLocal(b.EndsAt, zone), mine, title, owner);
             }).ToList();
             return new ResourceAvailability(resource.Id, resource.Name, resource.Type, resource.Capacity,
                 resource.OpensAt, resource.ClosesAt, resource.Units, own.Count == 0 ? resource.Units : 0, busy);

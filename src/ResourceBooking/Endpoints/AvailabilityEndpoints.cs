@@ -18,6 +18,25 @@ public static class AvailabilityEndpoints
                 ? Results.Ok(await availability.DayAsync(date, type, http.User.UserId()!.Value, http.User.IsInRole(nameof(Role.Admin)), ct))
                 : ApiResults.Problem(ApiError.BadRequest("Give a date before the year 9999")));
 
+        // The month view (design: month-view §3): totals per calendar day for one type, the same for every caller.
+        api.MapGet("/availability/month", async (int year, int month, ResourceType type, Reports.Utilisation utilisation, CancellationToken ct) =>
+        {
+            if (year is < CalendarRange.FirstYear or > CalendarRange.LastYear || month is < 1 or > 12 || !Enum.IsDefined(type))
+            {
+                return ApiResults.Problem(ApiError.BadRequest($"Give a month from 1 to 12, a year from {CalendarRange.FirstYear} to {CalendarRange.LastYear} and a resource type"));
+            }
+            var first = new DateOnly(year, month, 1);
+            var last = first.AddMonths(1).AddDays(-1);
+            var (_, rows) = await utilisation.ByDayAsync(first, last, type, ct);
+            var byDay = rows.ToLookup(r => r.Day);
+            var days = Enumerable.Range(0, last.Day).Select(first.AddDays).Select(date =>
+            {
+                double used = byDay[date].Sum(r => r.Used), available = byDay[date].Sum(r => r.Available);
+                return new DayShare(date, used, available, available > 0 ? used / available : null);
+            }).ToList();
+            return Results.Ok(new MonthOccupancy(year, month, type, days));
+        });
+
         api.MapGet("/resources/free", async (ResourceType type, DateTime start, DateTime end, int attendees,
             AvailabilityService availability, TimeZoneInfo zone, CancellationToken ct) =>
         {

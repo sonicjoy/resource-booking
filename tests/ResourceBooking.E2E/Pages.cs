@@ -18,6 +18,10 @@ public static class Pages
     public static ILocator Cell(this IPage page, string resource, string time) =>
         page.Locator($"button.cell[aria-label^='{resource}, {time}, ']");
 
+    /// <summary>A day on the Month page, by the start of its accessible name ("Thursday 3 December, ...").</summary>
+    public static ILocator DayLink(this IPage page, DateOnly day) =>
+        page.Locator($"a.day[aria-label^='{day.ToString("dddd d MMMM", System.Globalization.CultureInfo.InvariantCulture)}, ']");
+
     public static async Task GoToTomorrowAsync(this IPage page) => await page.Button("Next day").ClickAsync();
 
     public static async Task OpenTabAsync(this IPage page, string tab) =>
