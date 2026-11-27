@@ -44,6 +44,29 @@ public class MyBookingsTests(AppFixture app) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Moving_a_booking_to_a_later_time_shows_the_new_time_in_my_bookings_and_on_Book()
+    {
+        var ana = await app.SignInAsync("Ana", Browser);
+        await ana.GetByRole(AriaRole.Link, new() { Name = "My bookings" }).ClickAsync();
+        var row = ana.GetByRole(AriaRole.Row).Filter(new() { HasText = "Quarterly review" });
+        await Expect(row).ToContainTextAsync("10:00 to 11:00");
+
+        await row.Locator("fluent-button, button").Filter(new() { HasTextRegex = new Regex("^\\s*Edit\\s*$") }).ClickAsync();
+        await ana.FillFieldAsync("Start", "14:00");
+        await ana.FillFieldAsync("End", "15:30");
+        await ana.ConfirmAsync();
+
+        await Expect(ana.Locator("[role=status]")).ToContainTextAsync("Changed your booking of Severn");
+        await Expect(row).ToHaveCountAsync(1);
+        await Expect(row).ToContainTextAsync("14:00 to 15:30");
+
+        await ana.GotoAsync($"/book?date={Day(3)}&type=MeetingRoom");
+        await Expect(ana.Cell("Severn", "14:00")).ToHaveAttributeAsync("aria-label", "Severn, 14:00, your booking: Quarterly review");
+        await Expect(ana.Cell("Severn", "15:00")).ToHaveAttributeAsync("aria-label", "Severn, 15:00, your booking: Quarterly review");
+        await Expect(ana.Cell("Severn", "10:00")).ToHaveAttributeAsync("aria-label", "Severn, 10:00, free");
+    }
+
+    [Fact]
     public async Task An_edit_that_overlaps_says_so_without_offering_another_resource()
     {
         using var ben = await app.ApiAsAsync(Seed.BenId);
